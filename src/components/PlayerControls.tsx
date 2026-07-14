@@ -73,7 +73,11 @@ export default function PlayerControls() {
 
         {/* 4. 全屏 */}
         <button
-          onClick={toggleFullscreen}
+          onClick={() => {
+            toggleFullscreen()
+            if (document.fullscreenElement) document.exitFullscreen()
+            else document.documentElement.requestFullscreen().catch(() => {})
+          }}
           className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10"
         >
           {isFullscreen ? '🗗' : '⛶'}

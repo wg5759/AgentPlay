@@ -35,6 +35,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!text) return
     get().addMessage('user', text)
     set({ inputText: '', thinking: true })
+    get().addMessage('agent', '思考中…')
 
     const history = get()
       .messages.filter((m) => m.text !== '思考中…')
@@ -44,6 +45,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (window.aiPlayer?.ai) {
       try {
         const result = await window.aiPlayer.ai.chat(history)
+        set((s) => ({ messages: s.messages.filter((m) => m.text !== '思考中…') }))
         let reply = result.text
         if (result.toolResults.length > 0) {
           const actions = result.toolResults

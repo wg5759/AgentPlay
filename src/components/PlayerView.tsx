@@ -112,6 +112,8 @@ export default function PlayerView({ onBack }: Props) {
       const filePath = (file as File & { path: string }).path
       usePlayerStore.getState().setMedia(file.name, filePath)
     } else if (file.type.startsWith('video')) {
+      const oldSrc = usePlayerStore.getState().videoSrc
+      if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc)
       usePlayerStore.getState().setMedia(file.name, URL.createObjectURL(file))
     }
   }

@@ -91,14 +91,14 @@ class CastService {
         res.end('forbidden')
         return
       }
-      if (fs.existsSync(filePath)) {
-        const stat = fs.statSync(filePath)
+      if (fs.existsSync(resolved)) {
+        const stat = fs.statSync(resolved)
         res.writeHead(200, {
           'Content-Length': stat.size,
           'Content-Type': 'video/mp4',
           'Accept-Ranges': 'bytes'
         })
-        fs.createReadStream(filePath).pipe(res)
+        fs.createReadStream(resolved).pipe(res)
       } else {
         res.writeHead(404)
         res.end()

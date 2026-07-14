@@ -64,11 +64,12 @@ const TOOLS = [
         properties: { file_path: { type: 'string', description: '文件路径' } },
         required: ['file_path']
       }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'load_subtitle',
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'load_subtitle',
         description: '加载字幕文件（srt/ass/vtt）',
         parameters: {
           type: 'object',
