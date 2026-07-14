@@ -1,0 +1,52 @@
+{
+  "name": "ai-player",
+  "version": "0.1.0",
+  "description": "AI媒体中枢 - 会动手的播放器（桌面+Web双端）",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:web": "vite",
+    "dev:electron": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "build:web": "vite build",
+    "build:electron": "vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "formidable": "^3.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.0",
+    "electron": "^28.3.3",
+    "electron-builder": "^25.1.8",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vite-plugin-pwa": "^0.21.1",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.aiplayer.app",
+    "productName": "AI播放器",
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    }
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  }
+}
