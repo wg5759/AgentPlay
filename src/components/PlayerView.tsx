@@ -6,8 +6,27 @@ interface Props {
   onBack: () => void
 }
 
+const VIDEO_EXTS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v', '.wmv']
+const AUDIO_EXTS = ['.mp3', '.flac', '.wav', '.aac', '.m4a', '.ogg']
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
+const TEXT_EXTS = ['.txt', '.md', '.json', '.csv', '.xml', '.html', '.css', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.sh', '.yml', '.yaml', '.ini', '.log', '.sql']
+const OFFICE_EXTS = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+
+function getFileType(name?: string | null): string {
+  if (!name) return 'none'
+  const ext = ('.' + (name.split('.').pop() || '')).toLowerCase()
+  if (VIDEO_EXTS.includes(ext)) return 'video'
+  if (AUDIO_EXTS.includes(ext)) return 'audio'
+  if (IMAGE_EXTS.includes(ext)) return 'image'
+  if (ext === '.pdf') return 'pdf'
+  if (TEXT_EXTS.includes(ext)) return 'text'
+  if (OFFICE_EXTS.includes(ext)) return 'office'
+  return 'other'
+}
+
 export default function PlayerView({ onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const mediaName = usePlayerStore((s) => s.mediaName)
   const videoSrc = usePlayerStore((s) => s.videoSrc)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
@@ -20,28 +39,30 @@ export default function PlayerView({ onBack }: Props) {
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const isDesktop = window.aiPlayer?.isElectron === true
+  const fileType = getFileType(mediaName)
+  const isMedia = fileType === 'video' || fileType === 'audio'
 
-  // 桌面端文件路径转 file:// URL，Web 端直接用 blob/http URL
-  const videoUrl =
+  const fileUrl =
     isDesktop && videoSrc && !videoSrc.startsWith('http') && !videoSrc.startsWith('blob:')
       ? 'file:///' + videoSrc.replace(/\\/g, '/')
       : videoSrc
 
   useEffect(() => {
-    const v = videoRef.current
-    if (!v || !videoUrl) return
-    if (isPlaying) v.play().catch(() => {})
-    else v.pause()
-  }, [isPlaying, videoUrl])
+    const el = fileType === 'video' ? videoRef.current : fileType === 'audio' ? audioRef.current : null
+    if (!el || !fileUrl) return
+    if (isPlaying) el.play().catch(() => {})
+    else el.pause()
+  }, [isPlaying, fileUrl, fileType])
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.volume = volume / 100
-  }, [volume])
+    const el = fileType === 'video' ? videoRef.current : fileType === 'audio' ? audioRef.current : null
+    if (el) el.volume = volume / 100
+  }, [volume, fileType])
 
   useEffect(() => {
-    const v = videoRef.current
-    if (v && Math.abs(v.currentTime - currentTime) > 1) v.currentTime = currentTime
-  }, [currentTime])
+    const el = fileType === 'video' ? videoRef.current : fileType === 'audio' ? audioRef.current : null
+    if (el && Math.abs(el.currentTime - currentTime) > 1) el.currentTime = currentTime
+  }, [currentTime, fileType])
 
   const handleMouseMove = () => {
     setControlsVisible(true)
@@ -60,7 +81,7 @@ export default function PlayerView({ onBack }: Props) {
     }
     if (isDesktop) {
       usePlayerStore.getState().setMedia(file.name, (file as File & { path: string }).path)
-    } else if (file.type.startsWith('video')) {
+    } else {
       const oldSrc = usePlayerStore.getState().videoSrc
       if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc)
       usePlayerStore.getState().setMedia(file.name, URL.createObjectURL(file))
@@ -81,39 +102,70 @@ export default function PlayerView({ onBack }: Props) {
         if (p) usePlayerStore.getState().setMedia(p.split(/[\\/]/).pop() || p, p)
       }}
       onDoubleClick={() => {
+        if (fileType === 'office' || fileType === 'other') return
         const s = usePlayerStore.getState()
         s.toggleFullscreen()
         if (document.fullscreenElement) document.exitFullscreen()
         else document.documentElement.requestFullscreen().catch(() => {})
       }}
     >
-      {videoUrl ? (
+      {fileType === 'video' && fileUrl && (
         <video
           ref={videoRef}
-          src={videoUrl}
+          src={fileUrl}
           className="max-w-full max-h-full"
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           onTimeUpdate={(e) => seek(e.currentTarget.currentTime)}
           onEnded={() => usePlayerStore.setState({ isPlaying: false })}
           playsInline
         />
-      ) : (
+      )}
+      {fileType === 'audio' && fileUrl && (
+        <div className="text-center">
+          <p className="text-5xl mb-4">🎵</p>
+          <p className="text-gray-300 mb-4">{mediaName}</p>
+          <audio
+            ref={audioRef}
+            src={fileUrl}
+            className="w-96"
+            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+            onTimeUpdate={(e) => seek(e.currentTarget.currentTime)}
+            onEnded={() => usePlayerStore.setState({ isPlaying: false })}
+          />
+        </div>
+      )}
+      {fileType === 'image' && fileUrl && (
+        <img src={fileUrl} alt={mediaName ?? ''} className="max-w-full max-h-full object-contain" />
+      )}
+      {fileType === 'pdf' && fileUrl && (
+        <iframe src={fileUrl} title="pdf" className="w-full h-full bg-white" />
+      )}
+      {fileType === 'text' && fileUrl && (
+        <iframe src={fileUrl} title="text" className="w-full h-full bg-white" />
+      )}
+      {fileType === 'office' && (
+        <div className="text-gray-400 text-center">
+          <p className="text-2xl mb-2">{mediaName}</p>
+          <p className="text-sm">Office 文件暂不支持预览，请右键用系统程序打开</p>
+        </div>
+      )}
+      {fileType === 'none' && (
         <div className="text-gray-600 text-center">
-          <p className="text-2xl mb-2">{mediaName ?? '未选择媒体'}</p>
-          <p className="text-sm">拖拽视频文件到此处，或从媒体库选择</p>
+          <p className="text-2xl mb-2">未选择文件</p>
+          <p className="text-sm">右键打开文件，或拖拽文件到此处，或从媒体库选择</p>
         </div>
       )}
 
       <button
         onClick={onBack}
         className={`absolute top-4 left-4 px-3 py-1 bg-player-surface/80 rounded text-sm hover:bg-player-surface transition-opacity duration-300 ${
-          controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          controlsVisible || !isMedia ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         ← 媒体库
       </button>
 
-      <PlayerControls />
+      {isMedia && <PlayerControls />}
     </div>
   )
 }
