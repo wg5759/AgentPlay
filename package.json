@@ -35,9 +35,13 @@
   "build": {
     "appId": "com.aiplayer.app",
     "productName": "AI播放器",
+    "asar": false,
+    "npmRebuild": false,
     "files": [
       "dist/**/*",
-      "electron/**/*"
+      "electron/**/*",
+      "resources/bin/win/mpv.exe",
+      "resources/bin/win/vulkan-1.dll"
     ],
     "directories": {
       "output": "release"

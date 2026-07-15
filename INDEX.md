@@ -39,7 +39,8 @@ ai-player/
 - 验证：tsc 零错误 + vite build 通过
 - 双端：Electron 桌面（mpv 全功能）+ Web PWA（HTML5 video）
 - Agent 工具集（7个）：暂停/继续/跳转/音量/字幕/打印/加载字幕
-- 待优化：mpv 窗口嵌入、局域网服务认证、本地 LLM
+- 已完成：mpv 窗口嵌入（--wid HWND 真嵌入，mpv 嵌入容器 child 窗口，MainWindowHandle=0 验证通过；控制条留白可点击 + 键盘快捷键）
+- 待优化：局域网服务认证、本地 LLM
 
 ## 运行
 

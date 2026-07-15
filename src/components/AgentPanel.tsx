@@ -1,6 +1,5 @@
 import { useAgentStore } from '../stores/agentStore'
 
-// Agent 浮层：半透明，可说话可打字，唤醒后弹出
 export default function AgentPanel() {
   const { messages, inputText, setInputText, send, closePanel, listening, toggleListening } =
     useAgentStore()
@@ -32,6 +31,21 @@ export default function AgentPanel() {
           </div>
         </div>
 
+        {/* 输入框（置顶） */}
+        <div className="px-4 py-3 border-b border-white/10 flex gap-2">
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && send()}
+            placeholder="打字或点麦克风说话…"
+            className="flex-1 bg-black/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ring-player-accent"
+          />
+          <button onClick={send} className="px-4 py-2 bg-player-accent rounded-lg text-sm">
+            发送
+          </button>
+        </div>
+
         {/* 消息列表 */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
           {messages.length === 0 && (
@@ -47,21 +61,6 @@ export default function AgentPanel() {
               {m.text}
             </div>
           ))}
-        </div>
-
-        {/* 输入框 */}
-        <div className="px-4 py-3 border-t border-white/10 flex gap-2">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && send()}
-            placeholder="打字或点麦克风说话…"
-            className="flex-1 bg-black/40 rounded-lg px-3 py-2 text-sm outline-none focus:ring-1 ring-player-accent"
-          />
-          <button onClick={send} className="px-4 py-2 bg-player-accent rounded-lg text-sm">
-            发送
-          </button>
         </div>
       </div>
     </div>

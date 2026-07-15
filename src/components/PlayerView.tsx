@@ -9,12 +9,15 @@ interface Props {
 export default function PlayerView({ onBack }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const mpvTimeRef = useRef(0) // mpv 最后报告的位置（区分用户拖拽与事件更新）
+  const playerAreaRef = useRef<HTMLDivElement>(null)
+  const measureRef = useRef<() => void>(() => {})
   const mediaName = usePlayerStore((s) => s.mediaName)
   const videoSrc = usePlayerStore((s) => s.videoSrc)
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const volume = usePlayerStore((s) => s.volume)
   const currentTime = usePlayerStore((s) => s.currentTime)
   const setControlsVisible = usePlayerStore((s) => s.setControlsVisible)
+  const controlsVisible = usePlayerStore((s) => s.controlsVisible)
   const setDuration = usePlayerStore((s) => s.setDuration)
   const seek = usePlayerStore((s) => s.seek)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -25,9 +28,16 @@ export default function PlayerView({ onBack }: Props) {
   // 桌面端：mpv 加载文件
   useEffect(() => {
     if (!isDesktop || !player || !videoSrc) return
+    player.showContainer()
     player.loadFile(videoSrc)
     if (isPlaying) player.play()
   }, [videoSrc])
+
+  // 桌面端：离开播放器视图时隐藏 mpv 容器
+  useEffect(() => {
+    if (!isDesktop || !player) return
+    return () => player.hideContainer()
+  }, [isDesktop, player])
 
   // 桌面端：播放/暂停
   useEffect(() => {
@@ -91,6 +101,72 @@ export default function PlayerView({ onBack }: Props) {
     if (v && Math.abs(v.currentTime - currentTime) > 1) v.currentTime = currentTime
   }, [currentTime])
 
+  // 桌面端：测量播放区上报；控制条/返回钮可见时容器上下留白避免被 mpv 盖住
+  useEffect(() => {
+    if (!isDesktop || !player) return
+    const el = playerAreaRef.current
+    if (!el) return
+    const TOP_UI = 44
+    const BOTTOM_UI = 80
+    const measure = () => {
+      const r = el.getBoundingClientRect()
+      const visible = usePlayerStore.getState().controlsVisible
+      if (visible) {
+        player.setPlayerArea({
+          x: r.left,
+          y: r.top + TOP_UI,
+          width: r.width,
+          height: Math.max(1, r.height - TOP_UI - BOTTOM_UI)
+        })
+      } else {
+        player.setPlayerArea({ x: r.left, y: r.top, width: r.width, height: r.height })
+      }
+    }
+    measureRef.current = measure
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    const off = player.onRemeasure(() => measure())
+    return () => {
+      ro.disconnect()
+      off()
+      measureRef.current = () => {}
+    }
+  }, [isDesktop, player])
+
+  // 控制条显隐时重测，mpv 容器上下留白随之伸缩
+  useEffect(() => {
+    measureRef.current?.()
+  }, [controlsVisible])
+
+  // 桌面端：键盘快捷键（mpv 已 --input-vo-keyboard=no 不抢键盘）
+  useEffect(() => {
+    if (!isDesktop) return
+    const onKey = (e: KeyboardEvent) => {
+      const s = usePlayerStore.getState()
+      if (e.key === ' ') {
+        e.preventDefault()
+        s.togglePlay()
+      } else if (e.key === 'ArrowLeft') {
+        s.seek(Math.max(0, s.currentTime - 5))
+      } else if (e.key === 'ArrowRight') {
+        s.seek(Math.min(s.duration, s.currentTime + 5))
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        s.setVolume(Math.min(100, s.volume + 5))
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        s.setVolume(Math.max(0, s.volume - 5))
+      } else if (e.key === 'f' || e.key === 'F') {
+        s.toggleFullscreen()
+        if (document.fullscreenElement) document.exitFullscreen()
+        else document.documentElement.requestFullscreen().catch(() => {})
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isDesktop])
+
   const handleMouseMove = () => {
     setControlsVisible(true)
     if (hideTimer.current) clearTimeout(hideTimer.current)
@@ -122,17 +198,17 @@ export default function PlayerView({ onBack }: Props) {
 
   return (
     <div
+      ref={playerAreaRef}
       className="flex-1 relative bg-black flex items-center justify-center"
       onMouseMove={handleMouseMove}
       onDrop={handleDrop}
       onDragOver={(e) => e.preventDefault()}
     >
       {isDesktop ? (
-        // 桌面端：mpv 独立窗口播放，此处显示占位（窗口嵌入待 V1 优化）
         <div className="text-gray-500 text-center">
           <p className="text-2xl mb-2">{mediaName ?? '未选择媒体'}</p>
           <p className="text-sm">
-            {videoSrc ? 'mpv 播放中（独立窗口）' : '从媒体库选择或拖拽文件'}
+            {videoSrc ? 'mpv 嵌入播放中' : '从媒体库选择或拖拽文件'}
           </p>
         </div>
       ) : videoSrc ? (
@@ -155,7 +231,9 @@ export default function PlayerView({ onBack }: Props) {
 
       <button
         onClick={onBack}
-        className="absolute top-4 left-4 px-3 py-1 bg-player-surface/80 rounded text-sm hover:bg-player-surface"
+        className={`absolute top-4 left-4 px-3 py-1 bg-player-surface/80 rounded text-sm hover:bg-player-surface transition-opacity duration-300 ${
+          controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
       >
         ← 媒体库
       </button>

@@ -33,6 +33,7 @@ export default function MediaLibrary({ onPlay }: Props) {
   const [peerUrl, setPeerUrl] = useState('')
   const [syncStatus, setSyncStatus] = useState('')
   const [urlInput, setUrlInput] = useState('')
+  const [showMore, setShowMore] = useState(false)
 
   const addNetworkSource = () => {
     const url = urlInput.trim()
@@ -117,8 +118,19 @@ export default function MediaLibrary({ onPlay }: Props) {
     return ''
   }
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (!file) return
+    if (isDesktop) {
+      onPlay(file.name, (file as File & { path: string }).path)
+    } else if (file.type.startsWith('video')) {
+      onPlay(file.name, URL.createObjectURL(file))
+    }
+  }
+
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col" onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
       <div className="flex items-center gap-3 px-6 py-4">
         <button
           onClick={openPanel}
@@ -139,6 +151,12 @@ export default function MediaLibrary({ onPlay }: Props) {
         >
           + 网络源
         </button>
+        <button
+          onClick={() => setShowMore(!showMore)}
+          className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent"
+        >
+          {showMore ? '收起' : '更多'}
+        </button>
       </div>
       {showAddUrl && (
         <div className="flex items-center gap-2 px-6 pb-2">
@@ -157,13 +175,13 @@ export default function MediaLibrary({ onPlay }: Props) {
       )}
 
       <div className="flex-1 overflow-y-auto px-6 pb-6">
-        {wifiUrl && (
+        {showMore && wifiUrl && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">📱 WiFi 传文件</p>
             <p className="text-xs text-gray-500 mt-1">手机浏览器访问：{wifiUrl}</p>
           </div>
         )}
-        {syncUrl && (
+        {showMore && syncUrl && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">🔄 跨设备同步</p>
             <p className="text-xs text-gray-500 mt-1">本机：{syncUrl}</p>
@@ -181,7 +199,7 @@ export default function MediaLibrary({ onPlay }: Props) {
             {syncStatus && <p className="text-xs text-gray-500 mt-1">{syncStatus}</p>}
           </div>
         )}
-        {networkSources.length > 0 && (
+        {showMore && networkSources.length > 0 && (
           <div className="mb-6">
             <h2 className="text-gray-400 text-sm mb-3">网络源（{networkSources.length}）</h2>
             <div className="space-y-2">

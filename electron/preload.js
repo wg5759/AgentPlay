@@ -39,10 +39,18 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     setVolume: (v) => ipcRenderer.invoke('mpv:volume', v),
     loadSubtitle: (p) => ipcRenderer.invoke('mpv:subtitle', p),
     setSubtitleVisible: (v) => ipcRenderer.invoke('mpv:subtitle-visible', v),
+    setPlayerArea: (rect) => ipcRenderer.send('mpv:playerArea', rect),
+    showContainer: () => ipcRenderer.send('mpv:showContainer'),
+    hideContainer: () => ipcRenderer.send('mpv:hideContainer'),
     onEvent: (cb) => {
       const handler = (_e, data) => cb(data)
       ipcRenderer.on('mpv:event', handler)
       return () => ipcRenderer.removeListener('mpv:event', handler)
+    },
+    onRemeasure: (cb) => {
+      const handler = () => cb()
+      ipcRenderer.on('mpv:remeasure', handler)
+      return () => ipcRenderer.removeListener('mpv:remeasure', handler)
     }
   }
 })

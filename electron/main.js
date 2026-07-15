@@ -1,7 +1,7 @@
 // AI播放器 Electron 主进程
 // dev: 加载 Vite dev server；prod: 加载构建产物
 // 集成 mpv sidecar，IPC 桥接渲染进程
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, Menu } = require('electron')
 const path = require('path')
 const { MpvService } = require('./mpv-service')
 const { AgentEngine } = require('./llm-service')
@@ -19,6 +19,53 @@ let wifiTransfer = null
 let castService = null
 let syncService = null
 let mainWindow = null
+let mpvContainer = null
+let playerArea = null
+
+// 读取 BrowserWindow 原生句柄 HWND（Windows：指针值实际落在 32 位范围）
+function getHwndNumber(win) {
+  const buf = win.getNativeWindowHandle()
+  return buf.readInt32LE(0)
+}
+
+// 创建 mpv 嵌入容器窗口（child，无边框，黑色背景，不渲染 HTML 内容）
+// mpv --wid 附加到此窗口的 HWND，在其内创建子窗口渲染视频
+function createMpvContainer(parent) {
+  const pb = parent.getBounds()
+  const w = 800
+  const h = 450
+  const container = new BrowserWindow({
+    parent,
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    resizable: false,
+    hasShadow: false,
+    backgroundColor: '#000000',
+    width: w,
+    height: h,
+    x: pb.x + Math.round((pb.width - w) / 2),
+    y: pb.y + Math.round((pb.height - h) / 2)
+  })
+  container.loadURL('about:blank')
+  container.webContents.once('dom-ready', () => {
+    container.webContents.insertCSS('html,body{background:#000!important;margin:0;overflow:hidden}')
+  })
+  return container
+}
+
+function updateContainerBounds() {
+  if (!mpvContainer || mpvContainer.isDestroyed()) return
+  if (!playerArea || !mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) return
+  const cb = mainWindow.getContentBounds()
+  mpvContainer.setBounds({
+    x: cb.x + playerArea.x,
+    y: cb.y + playerArea.y,
+    width: Math.max(1, playerArea.width),
+    height: Math.max(1, playerArea.height)
+  })
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -43,12 +90,16 @@ function createWindow() {
   return mainWindow
 }
 
+Menu.setApplicationMenu(null)
+
 app.whenReady().then(async () => {
   const win = createWindow()
 
-  // 启动 mpv sidecar
+  mpvContainer = createMpvContainer(win)
+  const hwnd = getHwndNumber(mpvContainer)
+
   mpv = new MpvService()
-  await mpv.start()
+  await mpv.start(hwnd)
 
   agentEngine = new AgentEngine(mpv)
 
@@ -67,7 +118,27 @@ app.whenReady().then(async () => {
     }
   })
 
+  // 容器即时跟随；resize/maximize 时播放区布局可能变，请前端重测上报
+  ;['resize', 'move', 'maximize', 'unmaximize', 'restore'].forEach((evt) => {
+    win.on(evt, () => {
+      updateContainerBounds()
+      if (evt === 'resize' || evt === 'maximize' || evt === 'unmaximize') {
+        win.webContents.send('mpv:remeasure')
+      }
+    })
+  })
+
   // IPC：渲染进程 -> mpv
+  ipcMain.on('mpv:playerArea', (_e, rect) => {
+    playerArea = rect
+    updateContainerBounds()
+  })
+  ipcMain.on('mpv:showContainer', () => {
+    if (mpvContainer && !mpvContainer.isDestroyed()) mpvContainer.show()
+  })
+  ipcMain.on('mpv:hideContainer', () => {
+    if (mpvContainer && !mpvContainer.isDestroyed()) mpvContainer.hide()
+  })
   ipcMain.handle('mpv:load', (_e, p) => { mpv.loadFile(p); return true })
   ipcMain.handle('mpv:play', () => { mpv.play(); return true })
   ipcMain.handle('mpv:pause', () => { mpv.pause(); return true })
@@ -105,6 +176,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   if (mpv) mpv.stop()
+  if (mpvContainer && !mpvContainer.isDestroyed()) mpvContainer.destroy()
   if (wifiTransfer) wifiTransfer.stop()
   if (castService) castService.stop()
   if (syncService) syncService.stop()

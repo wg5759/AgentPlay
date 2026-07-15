@@ -6,8 +6,12 @@ interface AiPlayerPlayerAPI {
   seek: (s: number) => Promise<boolean>
     setVolume: (v: number) => Promise<boolean>
     loadSubtitle: (p: string) => Promise<boolean>
-    setSubtitleVisible: (v: boolean) => Promise<boolean>
-    onEvent: (cb: (data: MpvEvent) => void) => () => void
+  setSubtitleVisible: (v: boolean) => Promise<boolean>
+  setPlayerArea: (rect: { x: number; y: number; width: number; height: number }) => void
+  showContainer: () => void
+  hideContainer: () => void
+  onEvent: (cb: (data: MpvEvent) => void) => () => void
+  onRemeasure: (cb: () => void) => () => void
 }
 
 interface AiPlayerAPI {

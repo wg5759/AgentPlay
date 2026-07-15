@@ -5,6 +5,7 @@ import path from 'path'
 
 // 双端共享 Vite 配置：Electron 加载 dev server / 构建产物，Web 部署为 PWA
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     VitePWA({

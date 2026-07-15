@@ -12,6 +12,7 @@ class MpvService {
     this.ipcPath = null
     this.buffer = ''
     this.observers = new Set()
+    this.embedded = false
   }
 
   getBinaryPath() {
@@ -28,7 +29,7 @@ class MpvService {
   off(cb) { this.observers.delete(cb) }
   emit(event, data) { this.observers.forEach((cb) => cb(event, data)) }
 
-  async start() {
+  async start(embedHwnd = null) {
     if (!this.isAvailable()) {
       console.log('[MpvService] mpv 二进制未就绪: ' + this.getBinaryPath())
       return false
@@ -38,21 +39,31 @@ class MpvService {
         ? '\\\\.\\pipe\\mpv-' + Date.now()
         : '/tmp/mpv-' + Date.now() + '.sock'
 
-    this.proc = spawn(
-      this.getBinaryPath(),
-      [
-        '--idle',
-        '--no-terminal',
-        '--no-config',
-        '--force-window',
-        '--no-border',
-        '--keep-open=yes',
-        `--input-ipc-server=${this.ipcPath}`,
-        '--vo=gpu',
-        '--hwdec=auto'
-      ],
-      { cwd: path.dirname(this.getBinaryPath()) }
-    )
+    const args = [
+      '--idle',
+      '--no-terminal',
+      '--no-config',
+      '--no-border',
+      '--keep-open=yes',
+      `--input-ipc-server=${this.ipcPath}`,
+      '--vo=gpu',
+      '--hwdec=auto',
+      '--input-vo-keyboard=no',
+      '--input-cursor-passthrough=yes'
+    ]
+    if (embedHwnd) {
+      args.push(`--wid=${embedHwnd}`)
+      this.embedded = true
+      console.log('[MpvService] 嵌入模式 --wid=' + embedHwnd)
+    } else {
+      args.push('--force-window')
+      this.embedded = false
+      console.log('[MpvService] 独立窗口模式（未提供 HWND）')
+    }
+
+    this.proc = spawn(this.getBinaryPath(), args, {
+      cwd: path.dirname(this.getBinaryPath())
+    })
 
     this.proc.on('error', (err) => console.error('[MpvService] mpv 启动失败:', err))
     this.proc.on('exit', (code) => console.log(`[MpvService] mpv 退出 code=${code}`))
