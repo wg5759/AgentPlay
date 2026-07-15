@@ -30,10 +30,11 @@ interface AiPlayerAPI {
     cast: (deviceId: string, filePath: string) => Promise<{ success: boolean; action?: string; error?: string }>
   }
   tmdb?: {
-    search: (name: string) => Promise<{ title: string; poster: string | null; overview: string; year: string | null } | null>
+    search: (name: string, apiKey?: string) => Promise<{ title: string; poster: string | null; overview: string; year: string | null } | null>
   }
   wifi?: {
     url: () => Promise<string | null>
+    pin: () => Promise<string | null>
   }
   receiver?: {
     onPlay: (cb: (url: string) => void) => () => void

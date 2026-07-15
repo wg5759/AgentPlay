@@ -23,10 +23,11 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     cast: (deviceId, filePath) => ipcRenderer.invoke('cast:cast', deviceId, filePath)
   },
   tmdb: {
-    search: (name) => ipcRenderer.invoke('tmdb:search', name)
+    search: (name, apiKey) => ipcRenderer.invoke('tmdb:search', name, apiKey)
   },
   wifi: {
-    url: () => ipcRenderer.invoke('wifi:url')
+    url: () => ipcRenderer.invoke('wifi:url'),
+    pin: () => ipcRenderer.invoke('wifi:pin')
   },
   receiver: {
     onPlay: (cb) => {

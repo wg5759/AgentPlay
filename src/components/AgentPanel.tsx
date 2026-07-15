@@ -5,8 +5,10 @@ export default function AgentPanel() {
   const { messages, inputText, setInputText, send, closePanel, listening, toggleListening } =
     useAgentStore()
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('aiplayer_api_key') || '')
+  const [tmdbKey, setTmdbKey] = useState(() => localStorage.getItem('aiplayer_tmdb_key') || '')
   const saveKey = () => {
     localStorage.setItem('aiplayer_api_key', apiKey)
+    localStorage.setItem('aiplayer_tmdb_key', tmdbKey)
   }
 
   return (
@@ -44,12 +46,19 @@ export default function AgentPanel() {
                 type="text"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder="sk-...（DeepSeek 或火山方舟）"
                 className="flex-1 bg-black/40 rounded px-2 py-1 text-xs outline-none"
               />
               <button onClick={saveKey} className="px-3 py-1 bg-player-accent rounded text-xs">
                 保存
               </button>
+              <input
+                type="text"
+                value={tmdbKey}
+                onChange={(e) => setTmdbKey(e.target.value)}
+                placeholder="TMDB key（可选，海报刮削）"
+                className="flex-1 bg-black/40 rounded px-2 py-1 text-xs outline-none mt-1"
+              />
             </div>
           </div>
         )}

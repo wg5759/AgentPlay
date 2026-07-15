@@ -27,6 +27,7 @@ export default function MediaLibrary({ onPlay }: Props) {
   })
   const [showAddUrl, setShowAddUrl] = useState(false)
   const [wifiUrl, setWifiUrl] = useState<string | null>(null)
+  const [wifiPin, setWifiPin] = useState<string | null>(null)
   const [castDevices, setCastDevices] = useState<Array<{ id: string; name: string }>>([])
   const [castFile, setCastFile] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
@@ -84,6 +85,7 @@ export default function MediaLibrary({ onPlay }: Props) {
   useEffect(() => {
     if (isDesktop && window.aiPlayer?.wifi) {
       window.aiPlayer.wifi.url().then(setWifiUrl)
+      window.aiPlayer.wifi.pin().then(setWifiPin)
     }
     if (isDesktop && window.aiPlayer?.sync) {
       window.aiPlayer.sync.url().then(setSyncUrl)
@@ -181,6 +183,7 @@ export default function MediaLibrary({ onPlay }: Props) {
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">📱 WiFi 传文件</p>
             <p className="text-xs text-gray-500 mt-1">手机浏览器访问：{wifiUrl}</p>
+            <p className="text-xs text-gray-500">配对 PIN：{wifiPin || '...'}</p>
           </div>
         )}
         {showMore && syncUrl && (
