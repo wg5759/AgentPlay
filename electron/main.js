@@ -90,16 +90,19 @@ function createWindow() {
   return mainWindow
 }
 
-Menu.setApplicationMenu(null)
+const menuTemplate = [
+  { label: '文件', submenu: [{ role: 'quit', label: '退出' }] },
+  { label: '功能', submenu: [{ label: 'Agent 对话', click: () => mainWindow?.webContents.send('menu:agent') }] },
+  { label: '窗口', submenu: [{ role: 'minimize', label: '最小化' }, { role: 'close', label: '关闭' }] },
+  { label: '帮助', submenu: [{ label: '关于 AI播放器' }] }
+]
+Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
 
 app.whenReady().then(async () => {
   const win = createWindow()
 
-  mpvContainer = createMpvContainer(win)
-  const hwnd = getHwndNumber(mpvContainer)
-
   mpv = new MpvService()
-  await mpv.start(hwnd)
+  await mpv.start(null)
 
   agentEngine = new AgentEngine(mpv)
 

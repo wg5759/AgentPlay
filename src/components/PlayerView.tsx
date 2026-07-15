@@ -208,7 +208,7 @@ export default function PlayerView({ onBack }: Props) {
         <div className="text-gray-500 text-center">
           <p className="text-2xl mb-2">{mediaName ?? '未选择媒体'}</p>
           <p className="text-sm">
-            {videoSrc ? 'mpv 嵌入播放中' : '从媒体库选择或拖拽文件'}
+            {videoSrc ? 'mpv 播放中（独立窗口）' : '从媒体库选择或拖拽文件'}
           </p>
         </div>
       ) : videoSrc ? (
