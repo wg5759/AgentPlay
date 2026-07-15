@@ -72,11 +72,12 @@ const TOOLS = [
       name: 'summarize_video',
       description: '总结当前视频内容',
       parameters: { type: 'object', properties: {} }
-    },
-    {
-      type: 'function',
-      function: {
-        name: 'load_subtitle',
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'load_subtitle',
         description: '加载字幕文件（srt/ass/vtt）',
         parameters: {
           type: 'object',
