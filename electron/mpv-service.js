@@ -56,9 +56,8 @@ class MpvService {
       this.embedded = true
       console.log('[MpvService] 嵌入模式 --wid=' + embedHwnd)
     } else {
-      args.push('--force-window')
       this.embedded = false
-      console.log('[MpvService] 独立窗口模式（未提供 HWND）')
+      console.log('[MpvService] 后台模式（无窗口，PlayerView 用 HTML5 video 显示）')
     }
 
     this.proc = spawn(this.getBinaryPath(), args, {
