@@ -1,0 +1,39 @@
+name: Build All Platforms
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - name: Build Windows
+        if: matrix.os == 'windows-latest'
+        run: pnpm build:electron
+      - name: Build macOS
+        if: matrix.os == 'macos-latest'
+        run: pnpm exec electron-builder --mac dmg
+      - name: Build Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm exec electron-builder --linux AppImage deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIPlayer-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.AppImage
+            release/*.deb
