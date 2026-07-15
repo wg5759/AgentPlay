@@ -35,6 +35,9 @@ interface AiPlayerAPI {
   wifi?: {
     url: () => Promise<string | null>
   }
+  subtitle?: {
+    search: (name: string) => Promise<Array<{ id: string; language: string; release: string; url: string }> | null>
+  }
   xlsx?: {
     preview: (filePath: string) => Promise<{ success: boolean; html?: string; error?: string }>
   }

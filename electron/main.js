@@ -13,6 +13,7 @@ const { CastService } = require('./cast-service')
 const { SyncService } = require('./sync-service')
 const mammoth = require('mammoth')
 const XLSX = require('xlsx')
+const { searchSubtitle } = require('./subtitle-service')
 
 const isDev = !app.isPackaged
 let mpv = null
@@ -165,6 +166,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('print:file', (_e, p) => printFile(p))
   ipcMain.handle('wifi:url', () => (wifiTransfer ? wifiTransfer.getUrl() : null))
   ipcMain.handle('tmdb:search', (_e, name) => searchMovie(name, process.env.TMDB_API_KEY))
+  ipcMain.handle('subtitle:search', (_e, name) => searchSubtitle(name, process.env.OPENSUBTITLES_API_KEY))
   ipcMain.handle('cast:scan', () => castService.scan())
   ipcMain.handle('cast:cast', (_e, deviceId, filePath) => castService.cast(deviceId, filePath))
   ipcMain.handle('dialog:openFile', async () => { const { dialog } = require('electron'); const r = await dialog.showOpenDialog(mainWindow, { filters: [{ name: '视频', extensions: ['mp4','mkv','avi','mov','flv','webm','mp3','flac','wav'] }], properties: ['openFile'] }); return r.canceled ? null : r.filePaths[0] })

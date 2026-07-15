@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('aiPlayer', {
   wifi: {
     url: () => ipcRenderer.invoke('wifi:url')
   },
+  subtitle: {
+    search: (name) => ipcRenderer.invoke('subtitle:search', name)
+  },
   xlsx: {
     preview: (filePath) => ipcRenderer.invoke('xlsx:preview', filePath)
   },

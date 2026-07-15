@@ -38,6 +38,7 @@ export default function PlayerView({ onBack }: Props) {
   const seek = usePlayerStore((s) => s.seek)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [officeHtml, setOfficeHtml] = useState<string | null>(null)
+  const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
 
   const isDesktop = window.aiPlayer?.isElectron === true
   const fileType = getFileType(mediaName)
@@ -76,8 +77,10 @@ export default function PlayerView({ onBack }: Props) {
     const file = e.dataTransfer.files[0]
     if (!file) return
     const ext = (file.name.split('.').pop() || '').toLowerCase()
-    if (['srt', 'ass', 'ssa', 'vtt'].includes(ext) && isDesktop && window.aiPlayer?.player) {
-      window.aiPlayer.player.loadSubtitle((file as File & { path: string }).path)
+    if (['srt', 'ass', 'ssa', 'vtt'].includes(ext)) {
+      if (isDesktop) {
+        setSubtitleUrl('file:///' + (file as File & { path: string }).path.replace(/\\/g, '/'))
+      }
       return
     }
     if (isDesktop) {
@@ -134,7 +137,9 @@ export default function PlayerView({ onBack }: Props) {
           onTimeUpdate={(e) => seek(e.currentTarget.currentTime)}
           onEnded={() => usePlayerStore.setState({ isPlaying: false })}
           playsInline
-        />
+        >
+          {subtitleUrl && <track src={subtitleUrl} kind="subtitles" default />}
+        </video>
       )}
       {fileType === 'audio' && fileUrl && (
         <div className="text-center">
