@@ -69,7 +69,14 @@ const TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'load_subtitle',
+      name: 'summarize_video',
+      description: '总结当前视频内容',
+      parameters: { type: 'object', properties: {} }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'load_subtitle',
         description: '加载字幕文件（srt/ass/vtt）',
         parameters: {
           type: 'object',
@@ -123,6 +130,8 @@ class AgentEngine {
         return { success: true, action: 'set_volume', value: args.level, desc: `音量设为 ${args.level}` }
       case 'set_subtitle':
         return { success: true, action: 'set_subtitle', value: args.visible, desc: args.visible ? '字幕已开' : '字幕已关' }
+      case 'summarize_video':
+        return { success: true, action: 'summarize', desc: '视频摘要需音频转写 API 支持，当前为占位' }
       case 'load_subtitle':
         return { success: true, action: 'load_subtitle', value: args.file_path, desc: '字幕已加载' }
       default:
