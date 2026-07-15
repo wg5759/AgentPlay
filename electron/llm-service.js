@@ -87,7 +87,11 @@ class AgentEngine {
   constructor(mpv) {
     this.mpv = mpv
     // 优先 DeepSeek，其次火山方舟
-    if (process.env.DEEPSEEK_API_KEY) {
+    if (process.env.OLLAMA_MODEL) {
+      this.apiBase = 'http://localhost:11434/v1'
+      this.apiKey = 'ollama'
+      this.model = process.env.OLLAMA_MODEL
+    } else if (process.env.DEEPSEEK_API_KEY) {
       this.apiBase = 'https://api.deepseek.com/v1'
       this.apiKey = process.env.DEEPSEEK_API_KEY
       this.model = 'deepseek-chat'
