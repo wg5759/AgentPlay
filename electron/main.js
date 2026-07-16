@@ -89,11 +89,17 @@ function updateContainerBounds() {
 }
 
 function createWindow() {
+  const { screen } = require('electron')
+  const display = screen.getPrimaryDisplay()
+  const w = Math.min(1280, display.workArea.width - 40)
+  const h = Math.min(800, display.workArea.height - 40)
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: w,
+    height: h,
     minWidth: 800,
     minHeight: 600,
+    maxWidth: display.workArea.width,
+    maxHeight: display.workArea.height,
     backgroundColor: '#0a0a0a',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
