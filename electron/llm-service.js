@@ -142,6 +142,11 @@ class AgentEngine {
 
   async chat(messages, apiKey = null) {
     const key = apiKey || this.apiKey
+    let base = this.apiBase
+    if (apiKey && apiKey !== this.apiKey) {
+      if (apiKey.startsWith('sk-')) base = 'https://api.deepseek.com/v1'
+      else if (apiKey.length > 50) base = 'https://ark.cn-beijing.volces.com/api/v3'
+    }
     if (!key) {
       return {
         text: '[未配置 API key] 请在 Agent 面板填入 DeepSeek 或火山方舟 API key。',
@@ -155,7 +160,7 @@ class AgentEngine {
     for (let i = 0; i < 5; i++) {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 30000)
-      const resp = await fetch(`${this.apiBase}/chat/completions`, {
+      const resp = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -85,7 +85,7 @@ class MpvService {
     this.send({ command: ['observe_property', 5, 'volume'] })
 
     console.log('[MpvService] mpv 已启动，IPC: ' + this.ipcPath)
-    return true
+    return !!this.ipc && !this.ipc.destroyed
   }
 
   connectIpc() {

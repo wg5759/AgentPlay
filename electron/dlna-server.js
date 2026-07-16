@@ -48,7 +48,11 @@ class DlnaServer {
       res.end(JSON.stringify(files))
     } else {
       const filePath = decodeURIComponent(req.url.slice(1))
-      if (filePath && fs.existsSync(filePath)) {
+      const resolved = path.resolve(filePath)
+      if (!resolved.startsWith(path.resolve(this.sharedDir))) {
+        res.writeHead(403); res.end('forbidden'); return
+      }
+      if (fs.existsSync(resolved)) {
         const stat = fs.statSync(filePath)
         res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': 'video/mp4' })
         fs.createReadStream(filePath).pipe(res)

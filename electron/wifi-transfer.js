@@ -8,7 +8,7 @@ function uploadPage(pin) {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI播放器 WiFi传文件</title></head><body style="font-family:system-ui;padding:20px;max-width:500px;margin:0 auto;background:#0a0a0a;color:#fff">
 <h2>AI播放器 WiFi 传文件</h2>
 <p style="color:#888">配对 PIN：<b style="color:#3b82f6;font-size:1.5em">${pin}</b>（在电脑端 AI播放器 显示）</p>
-<form method="POST" enctype="multipart/form-data">
+<form method="POST" enctype="multipart/form-data" action="/?pin=${pin}">
   <input type="hidden" name="pin" value="${pin}">
   <input type="file" name="file" multiple style="margin:10px 0;color:#fff">
   <button type="submit" style="padding:10px 20px;background:#3b82f6;color:#fff;border:none;border-radius:6px">上传</button>
@@ -51,6 +51,12 @@ class WifiTransfer {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
       res.end(uploadPage(this.pin))
     } else if (req.method === 'POST') {
+      const urlParts = new URL(req.url, 'http://localhost')
+      if (urlParts.searchParams.get('pin') !== this.pin) {
+        res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' })
+        res.end('<p style="font-family:system-ui">PIN 错误</p>')
+        return
+      }
       const form = formidable({
         uploadDir: this.uploadDir,
         keepExtensions: true,

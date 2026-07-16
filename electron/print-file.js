@@ -2,7 +2,7 @@ const { BrowserWindow } = require('electron')
 const path = require('path')
 
 async function printFile(filePath) {
-  const win = new BrowserWindow({ show: false })
+  const win = new BrowserWindow({ show: false, sandbox: true, webPreferences: { contextIsolation: true, nodeIntegration: false } })
   const ext = path.extname(filePath).toLowerCase()
   try {
     if (ext === '.pdf') {

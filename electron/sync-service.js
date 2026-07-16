@@ -8,6 +8,7 @@ class SyncService {
     this.deviceId = os.hostname()
     this.peerUrl = null
     this.progress = {}
+    this.token = require('crypto').randomUUID()
   }
 
   getLanIp() {
@@ -15,13 +16,19 @@ class SyncService {
   }
 
   start() {
-    this.server = http.createServer((req, res) => this.handle(req, res))
+    this.server = http.createServer((req, res) => {
+      const url = new URL(req.url, 'http://localhost')
+      if (url.searchParams.get('token') !== this.token) {
+        res.writeHead(401); res.end('unauthorized'); return
+      }
+      this.handle(req, res)
+    })
     this.server.listen(this.port)
     return this.getUrl()
   }
 
   getUrl() {
-    return `http://${this.getLanIp()}:${this.port}`
+    return `http://${this.getLanIp()}:${this.port}?token=${this.token}`
   }
 
   handle(req, res) {

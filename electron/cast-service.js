@@ -77,9 +77,10 @@ class CastService {
         path.join(os.homedir(), '视频')
       ]
       const resolved = path.resolve(filePath)
+      const normalized = resolved.toLowerCase()
       if (
         !filePath ||
-        !allowedRoots.some((d) => resolved === d || resolved.startsWith(d + path.sep))
+        !allowedRoots.some((d) => normalized === d.toLowerCase() || normalized.startsWith(d.toLowerCase() + path.sep))
       ) {
         res.writeHead(403)
         res.end('forbidden')
