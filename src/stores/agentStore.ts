@@ -59,6 +59,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             else if (r.action === 'resume') usePlayerStore.setState({ isPlaying: true })
             else if (r.action === 'seek' && typeof r.value === 'number') ps.seek(r.value)
             else if (r.action === 'set_volume' && typeof r.value === 'number') ps.setVolume(r.value)
+            else if (r.action === 'set_subtitle' && typeof r.value === 'boolean') usePlayerStore.setState({ subtitleVisible: r.value })
           }
           if (descs.length) reply += `\n[已执行] ${descs.join('；')}`
         }

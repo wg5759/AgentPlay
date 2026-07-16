@@ -5,7 +5,7 @@ async function searchSubtitle(name, apiKey) {
       'https://api.opensubtitles.com/api/v1/subtitles?query=' +
         encodeURIComponent(name) +
         '&languages=zh,en',
-      { headers: { 'Api-Key': apiKey, 'User-Agent': 'AIPlayer/1.0' } }
+      { headers: { 'Api-Key': apiKey, 'User-Agent': 'AIPlayer/1.0' }, signal: AbortSignal.timeout(10000) }
     )
     const data = await resp.json()
     if (data.data && data.data.length > 0) {

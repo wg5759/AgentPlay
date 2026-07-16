@@ -37,8 +37,12 @@ export default function VoiceWake() {
         }
       }
     }
+    let retries = 0
+    const MAX_RETRIES = 5
     rec.onerror = () => {
-      try { rec.start() } catch { /* */ }
+      if (retries++ < MAX_RETRIES) {
+        setTimeout(() => { try { rec.start() } catch { /* */ } }, 1000 * retries)
+      }
     }
     rec.onend = () => {
       try { rec.start() } catch { /* */ }

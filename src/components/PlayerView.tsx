@@ -107,6 +107,12 @@ export default function PlayerView({ onBack }: Props) {
     }
   }, [fileType, videoSrc, mediaName])
 
+  useEffect(() => {
+    const handler = () => usePlayerStore.setState({ isFullscreen: !!document.fullscreenElement })
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
   useEffect(() => () => { if (hideTimer.current) clearTimeout(hideTimer.current) }, [])
 
   return (

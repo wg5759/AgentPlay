@@ -5,7 +5,7 @@ async function searchMovie(name, apiKey) {
   if (!apiKey) return null
   try {
     const url = `${TMDB_API}/search/movie?query=${encodeURIComponent(name)}&language=zh-CN&api_key=${apiKey}`
-    const resp = await fetch(url)
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) })
     const data = await resp.json()
     if (data.results && data.results.length > 0) {
       const m = data.results[0]

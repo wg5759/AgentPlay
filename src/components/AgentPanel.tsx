@@ -6,9 +6,11 @@ export default function AgentPanel() {
     useAgentStore()
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('aiplayer_api_key') || '')
   const [tmdbKey, setTmdbKey] = useState(() => localStorage.getItem('aiplayer_tmdb_key') || '')
+  const [showKeyEdit, setShowKeyEdit] = useState(false)
   const saveKey = () => {
     localStorage.setItem('aiplayer_api_key', apiKey)
     localStorage.setItem('aiplayer_tmdb_key', tmdbKey)
+    setShowKeyEdit(false)
   }
 
   return (
@@ -38,7 +40,12 @@ export default function AgentPanel() {
           </div>
         </div>
 
-        {!apiKey && (
+        {apiKey && !showKeyEdit && (
+          <div className="px-4 py-2 border-b border-white/10">
+            <button onClick={() => setShowKeyEdit(true)} className="text-xs text-player-accent">修改 API Key</button>
+          </div>
+        )}
+        {(!apiKey || showKeyEdit) && (
           <div className="px-4 py-3 border-b border-white/10">
             <p className="text-xs text-gray-400 mb-2">配置 API Key（DeepSeek 或火山方舟）</p>
             <div className="flex gap-2">
