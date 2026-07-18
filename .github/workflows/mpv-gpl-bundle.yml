@@ -82,6 +82,12 @@ jobs:
           choco install ccache nasm --no-progress -y
           ./ci/install-cmake.ps1 -arch x64
 
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: mpv-windows-x64-${{ env.MPV_COMMIT }}-ccache-v1
+
       - name: Pin every moving source dependency
         shell: pwsh
         working-directory: mpv-source

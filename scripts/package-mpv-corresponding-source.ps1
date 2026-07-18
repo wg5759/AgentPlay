@@ -131,7 +131,9 @@ Copy-DirectoryTree -Source $mpv -Destination $stage -ExcludedDirectories @(
 
 $repositoryRoots = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 Get-ChildItem -LiteralPath $mpv -Force -Recurse -Filter '.git' | ForEach-Object {
-    [void]$repositoryRoots.Add($_.Parent.FullName)
+    # Nested checkouts can expose either a real .git directory or a gitfile.
+    $repositoryRoot = if ($_.PSIsContainer) { $_.Parent.FullName } else { $_.Directory.FullName }
+    [void]$repositoryRoots.Add($repositoryRoot)
 }
 [void]$repositoryRoots.Add($mpv)
 
