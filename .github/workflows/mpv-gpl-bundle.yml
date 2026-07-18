@@ -120,13 +120,11 @@ jobs:
 
           git clone --filter=blob:none --no-checkout https://github.com/mesonbuild/wrapdb ../wrapdb
           git -C ../wrapdb checkout --detach $env:WRAPDB_COMMIT
-          New-Item -Path subprojects/packagefiles -ItemType Directory -Force | Out-Null
-          foreach ($name in @('expat', 'harfbuzz', 'libpng', 'zlib')) {
-            Copy-Item -LiteralPath "../wrapdb/subprojects/$name.wrap" -Destination "subprojects/$name.wrap"
-            $patches = "../wrapdb/subprojects/packagefiles/$name"
-            if (Test-Path -LiteralPath $patches) {
-              Copy-Item -LiteralPath $patches -Destination 'subprojects/packagefiles' -Recurse -Force
-            }
+          Get-ChildItem -LiteralPath '../wrapdb/subprojects' -File -Filter '*.wrap' |
+            Copy-Item -Destination 'subprojects' -Force
+          $wrapPatches = '../wrapdb/subprojects/packagefiles'
+          if (Test-Path -LiteralPath $wrapPatches) {
+            Copy-Item -LiteralPath $wrapPatches -Destination 'subprojects' -Recurse -Force
           }
 
       - name: Build exact GPL binary
