@@ -28,6 +28,16 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}\.ccache
       CCACHE_MAXSIZE: 500M
       MPV_COMMIT: 41f6a645068483470267271e1d09966ca3b9f413
+      SHADERC_COMMIT: e0a5092b4b05dbcc448b0883f3575163634f8e86
+      FFMPEG_MESON_COMMIT: e36046790a141c46de767e3c93b692e4c3b1c3de
+      LIBASS_COMMIT: cbb743215bad0fe202477e569fe8005545258ccd
+      LIBPLACEBO_COMMIT: 47587a2d47299f7261a01b77e989b74f80a99769
+      DAV1D_COMMIT: 43f3b8d33bae5179a134d1cd7c394063b1cebfcb
+      SPIRV_CROSS_COMMIT: 28184c1e138f18c330256eeb2f56b9f9fbc53921
+      VULKAN_LOADER_COMMIT: 7a07afe04ad134d4eabe25f62720177f60ed6627
+      LIBJXL_COMMIT: 53042ec537712e0df08709524f4df097d42174bc
+      AOM_COMMIT: 36d919cd32766f8fefae7abf5c754d883d7b2ab4
+      WRAPDB_COMMIT: 9aeb67cda4af3b70caa155374271a56ad74f7ee5
 
     steps:
       - name: Disable automatic line-ending conversion
@@ -71,11 +81,38 @@ jobs:
           python -m pip install meson==1.9.2
           choco install ccache nasm --no-progress -y
           ./ci/install-cmake.ps1 -arch x64
-          meson wrap update-db
-          meson wrap install expat
-          meson wrap install harfbuzz
-          meson wrap install libpng
-          meson wrap install zlib
+
+      - name: Pin every moving source dependency
+        shell: pwsh
+        working-directory: mpv-source
+        run: |
+          function Clone-Pinned([string]$Url, [string]$Path, [string]$Commit) {
+            git clone --filter=blob:none --no-checkout $Url $Path
+            git -C $Path checkout --detach $Commit
+            git -C $Path submodule update --init --recursive --depth 1
+          }
+
+          New-Item -Path subprojects -ItemType Directory -Force | Out-Null
+          Clone-Pinned 'https://github.com/google/shaderc' 'subprojects/shaderc_cmake' $env:SHADERC_COMMIT
+          Clone-Pinned 'https://gitlab.freedesktop.org/gstreamer/meson-ports/ffmpeg.git' 'subprojects/ffmpeg' $env:FFMPEG_MESON_COMMIT
+          Clone-Pinned 'https://github.com/libass/libass' 'subprojects/libass' $env:LIBASS_COMMIT
+          Clone-Pinned 'https://code.videolan.org/videolan/libplacebo.git' 'subprojects/libplacebo' $env:LIBPLACEBO_COMMIT
+          Clone-Pinned 'https://code.videolan.org/videolan/dav1d' 'subprojects/dav1d' $env:DAV1D_COMMIT
+          Clone-Pinned 'https://github.com/KhronosGroup/SPIRV-Cross' 'subprojects/spirv-cross' $env:SPIRV_CROSS_COMMIT
+          Clone-Pinned 'https://github.com/KhronosGroup/Vulkan-Loader' 'subprojects/vulkan-loader' $env:VULKAN_LOADER_COMMIT
+          Clone-Pinned 'https://github.com/libjxl/libjxl' 'subprojects/libjxl-cmake' $env:LIBJXL_COMMIT
+          Clone-Pinned 'https://aomedia.googlesource.com/aom' 'subprojects/aom-cmake' $env:AOM_COMMIT
+
+          git clone --filter=blob:none --no-checkout https://github.com/mesonbuild/wrapdb ../wrapdb
+          git -C ../wrapdb checkout --detach $env:WRAPDB_COMMIT
+          New-Item -Path subprojects/packagefiles -ItemType Directory -Force | Out-Null
+          foreach ($name in @('expat', 'harfbuzz', 'libpng', 'zlib')) {
+            Copy-Item -LiteralPath "../wrapdb/subprojects/$name.wrap" -Destination "subprojects/$name.wrap"
+            $patches = "../wrapdb/subprojects/packagefiles/$name"
+            if (Test-Path -LiteralPath $patches) {
+              Copy-Item -LiteralPath $patches -Destination 'subprojects/packagefiles' -Recurse -Force
+            }
+          }
 
       - name: Build exact GPL binary
         shell: pwsh
