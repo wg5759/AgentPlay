@@ -74,19 +74,34 @@ try {
     websocket.addEventListener('error', reject, { once: true })
   })
   await command('Runtime.enable')
-  for (let attempt = 0; attempt < 40; attempt++) {
-    if (await evaluate("Boolean(document.querySelector('video[data-ai-player-video=\"true\"]'))")) break
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const ready = await evaluate(`(() => {
+      const video = document.querySelector('video[data-ai-player-video="true"]')
+      return Boolean(video && video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0 && !video.error)
+    })()`)
+    if (ready) break
     await delay(250)
   }
   const version = await evaluate('window.aiPlayer?.version')
-  const videoLoaded = await evaluate("Boolean(document.querySelector('video[data-ai-player-video=\"true\"]'))")
+  const playback = await evaluate(`(() => {
+    const video = document.querySelector('video[data-ai-player-video="true"]')
+    return video ? {
+      present: true,
+      readyState: video.readyState,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      currentSrc: video.currentSrc,
+      error: video.error?.message || null
+    } : { present: false }
+  })()`)
   await evaluate("window.dispatchEvent(new CustomEvent('ai-player-action', { detail: 'analysis-studio' })); true")
   await delay(500)
   const body = await evaluate('document.body.innerText')
   const capabilities = await evaluate('window.aiPlayer.studio.capabilities()', true)
   const result = {
     version,
-    videoLoaded,
+    videoLoaded: Boolean(playback.present && playback.readyState >= 1 && playback.videoWidth > 0 && playback.videoHeight > 0 && !playback.error),
+    playback,
     studioVisible: body.includes('AI 拉片与原创工作台'),
     creativeTabVisible: body.includes('4 AI 成片'),
     advancedRender: capabilities?.advancedRender,

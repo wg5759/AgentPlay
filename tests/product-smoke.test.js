@@ -80,6 +80,14 @@ test('Explorer Open with accepts supported files with spaces and Chinese charact
   }
 })
 
+test('packaged UI smoke requires decoded video metadata, not merely a video element', () => {
+  const smoke = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'smoke-packaged-ui.mjs'), 'utf8')
+  assert.match(smoke, /readyState\s*>=\s*1/)
+  assert.match(smoke, /videoWidth\s*>\s*0/)
+  assert.match(smoke, /videoHeight\s*>\s*0/)
+  assert.match(smoke, /video\.error/)
+})
+
 test('player flex layout cannot push the control buttons below the viewport', () => {
   const playerView = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PlayerView.tsx'), 'utf8')
   const controls = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PlayerControls.tsx'), 'utf8')
