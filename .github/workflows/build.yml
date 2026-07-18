@@ -14,19 +14,19 @@ jobs:
   source-quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.32.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm audit --prod --registry=https://registry.npmjs.org
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: source-quality-evidence
