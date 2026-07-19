@@ -6,6 +6,14 @@ AgentPlay 是一个面向 AI 时代的本地媒体工作台：在可靠播放的
 
 > 当前版本：`0.6.1`。Windows 11 x64 已完成安装包、真实 EXE、视频加载和 MP4 导出验收；macOS、Linux、Android、iOS 尚未完成同等级端到端验证。请以 [MULTIPLATFORM.md](MULTIPLATFORM.md) 为准，不把“代码存在”或“CI 配置存在”当作已交付。
 
+## 下载
+
+- [AgentPlay 0.6.1 发布页](https://github.com/wg5759/AgentPlay/releases/tag/v0.6.1)
+- [Windows x64 标准版](https://github.com/wg5759/AgentPlay/releases/download/v0.6.1/AgentPlay-0.6.1-Windows-x64-Standard.exe)：不内置模型，SHA-256 `FE2E9D8C3BC3E6903395410512F9D74057553122F7DB9D87EDF4CF6BDE328BB2`
+- [Windows x64 本地 AI 版](https://github.com/wg5759/AgentPlay/releases/download/v0.6.1/AgentPlay-0.6.1-Windows-x64-Local-AI.exe)：内置轻量模型，SHA-256 `C7D3371D64DA3BB23B2C95555D18C3397DFF25824116777BDF58E7A0CDAAEE21`
+
+当前版本未购买 Authenticode 代码签名证书，Windows SmartScreen 可能提示“未知发布者”。请只从上述官方 Release 下载并核对 SHA-256。
+
 ## 已实现能力
 
 - 横屏、竖屏及不同宽高比视频完整适配，支持原始大小、1/2 窗口、铺满窗口和全屏。
