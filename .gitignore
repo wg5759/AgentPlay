@@ -5,3 +5,16 @@ release/
 .DS_Store
 .vite
 resources/bin/
+resources/models/
+resources/ai-runtime/
+resources/**/.cache/
+resources/**/*.part
+resources/**/*.zip
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.pem
+*.key
+*.keystore

@@ -7,9 +7,8 @@ const PLUGIN_DIR = path.join(os.homedir(), '.ai-player', 'plugins')
 
 const SAFE_API = {
   console: { log: console.log, error: console.error, warn: console.warn },
-  setTimeout, setInterval, clearTimeout, clearInterval,
   JSON, Math, Date, String, Number, Boolean, Array, Object,
-  RegExp, Error, Promise, Buffer
+  RegExp, Error, Promise
 }
 
 function loadPluginSafely(filePath, file) {
@@ -27,7 +26,13 @@ function loadPluginSafely(filePath, file) {
       name: plugin.name || file,
       version: plugin.version || '1.0',
       description: plugin.description || '',
-      tools: plugin.tools || [],
+      tools: Array.isArray(plugin.tools) ? plugin.tools.map((tool) => ({
+        name: String(tool.name || ''),
+        description: String(tool.description || ''),
+        parameters: tool.parameters && typeof tool.parameters === 'object'
+          ? JSON.parse(JSON.stringify(tool.parameters))
+          : { type: 'object', properties: {} }
+      })).filter((tool) => tool.name) : [],
       file
     }
   } catch (e) {

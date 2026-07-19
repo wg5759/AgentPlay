@@ -1,22 +1,33 @@
 {
   "name": "ai-player",
-  "version": "0.1.0",
+  "version": "0.6.1",
+  "author": "AgentPlay",
   "description": "AI媒体中枢 - 会动手的播放器（桌面+Web双端）",
   "main": "electron/main.js",
   "scripts": {
     "dev:web": "vite",
     "dev:electron": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
-    "build:web": "vite build",
-    "build:electron": "vite build && electron-builder",
-    "preview": "vite preview"
+    "build:web": "node scripts/build-web.mjs",
+    "build:electron": "pnpm build:web && pnpm build:electron:lean && pnpm build:electron:local-ai",
+    "build:electron:lean": "node scripts/build-voice-helper.mjs && electron-builder --config electron-builder.lean.yml",
+    "build:electron:local-ai": "node scripts/build-voice-helper.mjs && electron-builder",
+    "preview": "vite preview",
+    "platform:report": "node scripts/platform-capability-report.mjs",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:public:verify": "node scripts/verify-public-release-readiness.mjs",
+    "release:public:verify:binary": "node scripts/verify-public-release-readiness.mjs --binary",
+    "security:scan": "node scripts/security-release-scan.mjs --history",
+    "security:scan:packaged": "node scripts/security-release-scan.mjs --history --packaged",
+    "test": "node --test tests/*.test.js tests/*.test.mjs",
+    "check": "pnpm exec tsc --noEmit && pnpm exec eslint src --max-warnings=0 && pnpm security:scan && pnpm release:public:verify && pnpm test && pnpm build:web"
   },
   "dependencies": {
     "electron-log": "^5.4.4",
+    "exceljs": "4.4.0",
     "formidable": "^3.5.4",
     "mammoth": "^1.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "xlsx": "^0.18.5",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
@@ -45,19 +56,85 @@
   "build": {
     "appId": "com.aiplayer.app",
     "productName": "AI播放器",
-    "asar": false,
+    "asar": true,
+    "compression": "normal",
     "npmRebuild": false,
     "files": [
       "dist/**/*",
-      "electron/**/*",
-      "resources/bin/win/mpv.exe",
-      "resources/bin/win/vulkan-1.dll"
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin/win",
+        "to": "bin/win",
+        "filter": [
+          "mpv.exe",
+          "mpv.com",
+          "vulkan-1.dll",
+          "ai-player-voice.exe"
+        ]
+      },
+      {
+        "from": "resources/ai-runtime/win-x64",
+        "to": "ai-runtime/win-x64",
+        "filter": [
+          "llama-server.exe",
+          "*.dll"
+        ]
+      },
+      {
+        "from": "resources/models/Qwen2.5-0.5B-Instruct-Q4_0.gguf",
+        "to": "models/Qwen2.5-0.5B-Instruct-Q4_0.gguf"
+      },
+      {
+        "from": "resources/bundled-ai-manifest.json",
+        "to": "bundled-ai-manifest.json"
+      },
+      {
+        "from": "resources/licenses",
+        "to": "licenses",
+        "filter": [
+          "llama.cpp/**/*",
+          "mpv/**/*",
+          "qwen2.5-0.5b/LICENSE",
+          "qwen2.5-0.5b/README.md"
+        ]
+      },
+      {
+        "from": "LICENSE",
+        "to": "legal/LICENSE"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "legal/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "PRIVACY.md",
+        "to": "legal/PRIVACY.md"
+      }
     ],
     "directories": {
       "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icons/app-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "installerIcon": "resources/icons/app-icon.ico",
+      "uninstallerIcon": "resources/icons/app-icon.ico",
+      "artifactName": "AI播放器本地AI版安装包-${version}.${ext}"
     }
   },
   "pnpm": {
+    "overrides": {
+      "exceljs>uuid": "11.1.1"
+    },
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"

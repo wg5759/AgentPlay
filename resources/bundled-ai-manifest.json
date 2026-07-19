@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-17T16:24:14.971Z",
+  "product": "AI播放器本地AI版",
+  "model": {
+    "id": "ai-player-qwen2.5-0.5b",
+    "upstream": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+    "quantization": "Q4_0",
+    "license": "Apache-2.0",
+    "sourceUrl": "https://modelscope.cn/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+    "expectedSha256": "7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed"
+  },
+  "runtime": {
+    "name": "llama.cpp",
+    "tag": "b10063",
+    "commit": "7d56da7e546f54fb1fa54ef2bc9ad9a872860ab0",
+    "license": "MIT",
+    "sourceUrl": "https://github.com/ggml-org/llama.cpp/releases/tag/b10063",
+    "archiveSha256": "0995838d6d6ec853510181acc2cc09be9f0fe8106c5d3e042dad39f033a5cb03"
+  },
+  "artifacts": [
+    {
+      "role": "model",
+      "path": "models/Qwen2.5-0.5B-Instruct-Q4_0.gguf",
+      "size": 428730208,
+      "sha256": "7671c0c304e6ce5a7fc577bcb12aba01e2c155cc2efd29b2213c95b18edaf6ed"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-base.dll",
+      "size": 772096,
+      "sha256": "cdbe69e1bc651fdeb1948d9126c7374a380f89e10db6efa2ee2f491dc50328ff"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-alderlake.dll",
+      "size": 1180160,
+      "sha256": "f3f0596306aa9f24d46d1b53c098c776578aec576d1a5100c9276509f53721da"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-cannonlake.dll",
+      "size": 1395200,
+      "sha256": "a4cd4c37280723afa7263d9c34275e3a63aa28de63956533cc67eaaa4ade2a60"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-cascadelake.dll",
+      "size": 1381376,
+      "sha256": "76ef90b065bb4fde34a2dcf4cc464eea25573627a0707862b63c3b9481ab5bf4"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-cooperlake.dll",
+      "size": 1382400,
+      "sha256": "898f3a04babedb97dc9189e1025c23c4a3a205fbb87061fbe8264e90f1556b6d"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-haswell.dll",
+      "size": 1184768,
+      "sha256": "d273d25502bd37820c867c0a5f6abe3dae93a1da69ae7361b32a37ab955d9d80"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-icelake.dll",
+      "size": 1388032,
+      "sha256": "37989dff99f1e2476bf6585c2dcfeb3290d3a2d7f6053bac910f4ca0d0fa96d9"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-ivybridge.dll",
+      "size": 1073664,
+      "sha256": "1aa4f6e1a8eaf031cef7b4a9bfc9511a2e8366a5079092f68df44ea92a7f66ea"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-piledriver.dll",
+      "size": 1077760,
+      "sha256": "41b19dfa0f29aacd05c1b7bc73b8ee6512e16886a04e8373c6aebe4fbe7f2d44"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-sandybridge.dll",
+      "size": 1053696,
+      "sha256": "290cf1f7e03b44ecd4d86f19d0afbcfb92f27fe11a6826dd3ed9b0b5c51e04e3"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-sapphirerapids.dll",
+      "size": 1659392,
+      "sha256": "9af3a0a2bfbbd0cc55781815308428456bb9b5e12e1ea0a239076c2498e0b8d1"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-skylakex.dll",
+      "size": 1389056,
+      "sha256": "146041c7e55c8ca431c780eeb05873171672b4f8d1da111cf0c011f545f1332a"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-sse42.dll",
+      "size": 876544,
+      "sha256": "3aa686d08fcc59de85886da8ab2fe37ab2fb0bc4cfa018621190fc042f5a3294"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-x64.dll",
+      "size": 869376,
+      "sha256": "17b8a83a863a684de638f67e546258e1c0ab7d8285b9f9c74d92071cefcd89f0"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-cpu-zen4.dll",
+      "size": 1389056,
+      "sha256": "f2b100ba04e848255f2086abe07f5eb9d3d528a4c388bb33160968956c434193"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml-rpc.dll",
+      "size": 136192,
+      "sha256": "a6708f720411e3685c3182f3ab857e418715f5f8776ed52931394b5d99cde8a2"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/ggml.dll",
+      "size": 86016,
+      "sha256": "957d42f1a666a2985bdd7c41ecc4ca854d3024e2dea528c6b6773956b51ec97a"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/libomp140.x86_64.dll",
+      "size": 661856,
+      "sha256": "4a20c1e5c115c29771a12324513eb109badac72180f79481527ad79d996ffb33"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-batched-bench-impl.dll",
+      "size": 60928,
+      "sha256": "13b12f52b2d2040ed7f79563237a65365b42d06fbe30d05bd0872c7cdefae681"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-bench-impl.dll",
+      "size": 392704,
+      "sha256": "147b08233ec433fbb9cdc53ff237c41eabedd1260fd50fed3db721c266c3453a"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-cli-impl.dll",
+      "size": 3542528,
+      "sha256": "6e8dc11cb7ee36887d720f019abfb5f75512fb66dcfc92d2a9e744cc1073b385"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-common.dll",
+      "size": 7816192,
+      "sha256": "05ad6c2e9165652dd1209e2715bbea7419e328c2587ad534b28e017fcfb450e6"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-completion-impl.dll",
+      "size": 132608,
+      "sha256": "e4f5200ef7e6c3f21e1a94da2bff41b5e8ba170ff17bc04da776635aa932204d"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-fit-params-impl.dll",
+      "size": 40448,
+      "sha256": "a4fedbc935161dead70ff05a6056f11ee398913b4bc48e221d141051144049e5"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-perplexity-impl.dll",
+      "size": 193536,
+      "sha256": "da8cb0e7cba5408055643bf5f43fead80984e2f1bd0e574ec26d24e2ccc94a55"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-quantize-impl.dll",
+      "size": 136704,
+      "sha256": "edb208b03aba508692ac221749a7699c5e8edbb30487f4f894eff200dcdb6394"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama-server-impl.dll",
+      "size": 9539072,
+      "sha256": "d468255b72a322141796283c2281d8c114aa50cddc0f74ab756f6f22b9d2c995"
+    },
+    {
+      "role": "llama-server",
+      "path": "ai-runtime/win-x64/llama-server.exe",
+      "size": 9216,
+      "sha256": "c3f6daaeeef986a72d611856da872e6aae084c7002ad332e5e10b0c49f183e25"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/llama.dll",
+      "size": 2682880,
+      "sha256": "7a55ad898919d199b8c176c3efdb2f37588f3185739ad0854f9d4c64e635794f"
+    },
+    {
+      "role": "runtime-dependency",
+      "path": "ai-runtime/win-x64/mtmd.dll",
+      "size": 1250304,
+      "sha256": "3001ce66bbf363a7b272e470c8c3a7efcf3fd8ebb2bcc3e259d82bbe3f3acf04"
+    }
+  ]
+}

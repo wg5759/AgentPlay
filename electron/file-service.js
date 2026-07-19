@@ -11,8 +11,9 @@ const TEXT_EXTS = [
 ]
 const PDF_EXT = '.pdf'
 const OFFICE_EXTS = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp']
+const SUBTITLE_EXTS = ['.srt', '.ass', '.ssa', '.vtt']
 
-const ALL_EXTS = [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS, PDF_EXT, ...TEXT_EXTS, ...OFFICE_EXTS]
+const ALL_EXTS = [...VIDEO_EXTS, ...AUDIO_EXTS, ...IMAGE_EXTS, PDF_EXT, ...TEXT_EXTS, ...OFFICE_EXTS, ...SUBTITLE_EXTS]
 
 function getType(ext) {
   if (VIDEO_EXTS.includes(ext)) return 'video'
@@ -21,6 +22,7 @@ function getType(ext) {
   if (ext === PDF_EXT) return 'pdf'
   if (TEXT_EXTS.includes(ext)) return 'text'
   if (OFFICE_EXTS.includes(ext)) return 'office'
+  if (SUBTITLE_EXTS.includes(ext)) return 'subtitle'
   return 'other'
 }
 

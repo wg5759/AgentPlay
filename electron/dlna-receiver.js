@@ -11,27 +11,29 @@ class DlnaReceiver {
     this.onPlay = null
   }
 
-  start() {
-    this.startHttp()
+  async start() {
+    if (this.httpServer) return `http://${getLanIp()}:${this.port}`
+    await this.startHttp()
     this.startSsdp()
     this.notifyTimer = setInterval(() => this.notify(), 30000)
     this.notify()
     return `http://${getLanIp()}:${this.port}`
   }
 
-  startHttp() {
+  async startHttp() {
     this.httpServer = http.createServer((req, res) => this.handleHttp(req, res))
-    this.httpServer.listen(this.port)
+    this.port = await require('./utils').listenWithFallback(this.httpServer, this.port)
   }
 
   startSsdp() {
-    this.ssdpSocket = dgram.createSocket('udp4')
+    this.ssdpSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
     this.ssdpSocket.bind(1900, () => {
       try { this.ssdpSocket.addMembership('239.255.255.250') } catch {}
       this.ssdpSocket.setBroadcast(true)
     })
     this.ssdpSocket.on('message', (msg, rinfo) => {
-      if (msg.toString().includes('M-SEARCH')) {
+      const text = msg.toString()
+      if (text.includes('M-SEARCH') && /(MediaRenderer|ssdp:all)/i.test(text)) {
         this.respondToSearch(rinfo)
       }
     })
@@ -72,16 +74,23 @@ class DlnaReceiver {
     if (req.url === '/device.xml') {
       res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' })
       res.end(this.deviceXml())
+    } else if (req.url === '/AVTransport/scpd.xml' || req.url === '/RenderingControl/scpd.xml') {
+      res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' })
+      res.end(this.scpdXml())
     } else if (req.url.includes('/AVTransport/control') || req.url.includes('/RenderingControl/control')) {
       let body = ''
       req.on('data', (c) => (body += c))
       req.on('end', () => {
         const urlMatch = body.match(/<CurrentURI>([^<]+)<\/CurrentURI>/)
         if (urlMatch && this.onPlay) {
-          this.onPlay(decodeURIComponent(urlMatch[1]))
+          const url = urlMatch[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+          this.onPlay(decodeURIComponent(url))
         }
+        const actionMatch = String(req.headers.soapaction || '').match(/#([^"']+)/)
+        const action = actionMatch ? actionMatch[1] : urlMatch ? 'SetAVTransportURI' : 'Play'
+        const service = req.url.includes('/RenderingControl/') ? 'RenderingControl' : 'AVTransport'
         res.writeHead(200, { 'Content-Type': 'text/xml; charset=utf-8' })
-        res.end('<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:SetAVTransportURIResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/></s:Body></s:Envelope>')
+        res.end(`<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:${action}Response xmlns:u="urn:schemas-upnp-org:service:${service}:1"/></s:Body></s:Envelope>`)
       })
     } else {
       res.writeHead(404)
@@ -118,10 +127,17 @@ class DlnaReceiver {
 </root>`
   }
 
+  scpdXml() {
+    return `<?xml version="1.0"?><scpd xmlns="urn:schemas-upnp-org:service-1-0"><specVersion><major>1</major><minor>0</minor></specVersion><actionList><action><name>SetAVTransportURI</name></action><action><name>Play</name></action><action><name>Pause</name></action><action><name>Stop</name></action><action><name>Seek</name></action><action><name>SetVolume</name></action></actionList><serviceStateTable></serviceStateTable></scpd>`
+  }
+
   stop() {
     if (this.notifyTimer) clearInterval(this.notifyTimer)
     if (this.ssdpSocket) this.ssdpSocket.close()
     if (this.httpServer) this.httpServer.close()
+    this.notifyTimer = null
+    this.ssdpSocket = null
+    this.httpServer = null
   }
 }
 

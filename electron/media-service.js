@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const { getType } = require('./file-service')
 
 function extractTags(name, type) {
@@ -57,17 +58,50 @@ function clusterByTag(files) {
 }
 
 function findDuplicates(files) {
-  const seen = {}
+  const bySize = new Map()
   const dupes = []
-  for (const f of files) {
-    const key = f.size + '_' + f.name
-    if (seen[key]) {
-      dupes.push({ original: seen[key].path, duplicate: f.path, name: f.name })
-    } else {
-      seen[key] = f
+  for (const file of files) {
+    if (!file.size) continue
+    const group = bySize.get(file.size) || []
+    group.push(file)
+    bySize.set(file.size, group)
+  }
+
+  for (const group of bySize.values()) {
+    if (group.length < 2) continue
+    const seen = new Map()
+    for (const file of group) {
+      let hash
+      try {
+        hash = hashFile(file.path)
+      } catch {
+        continue
+      }
+      const original = seen.get(hash)
+      if (original) {
+        dupes.push({ original: original.path, duplicate: file.path, name: file.name })
+      } else {
+        seen.set(hash, file)
+      }
     }
   }
   return dupes
+}
+
+function hashFile(filePath) {
+  const hash = crypto.createHash('sha256')
+  const fd = fs.openSync(filePath, 'r')
+  const buffer = Buffer.allocUnsafe(1024 * 1024)
+  try {
+    let bytesRead
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null)
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead))
+    } while (bytesRead > 0)
+  } finally {
+    fs.closeSync(fd)
+  }
+  return hash.digest('hex')
 }
 
 function suggestClip(files) {

@@ -1,16 +1,19 @@
 import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 
-// 极简控制条：6 个控件（播放/进度/音量/字幕/全屏/麦克风）
-// 悬停浮现，3 秒无操作自动隐藏（全屏沉浸）
-export default function PlayerControls() {
+interface Props {
+  onInteractionStart?: () => void
+  onInteractionEnd?: () => void
+}
+
+export default function PlayerControls({ onInteractionStart, onInteractionEnd }: Props) {
   const {
     isPlaying, togglePlay,
     volume, setVolume,
     currentTime, duration, seek,
     subtitleVisible, toggleSubtitle,
     isFullscreen, toggleFullscreen,
-    controlsVisible
+    controlsVisible, playbackRate, setPlaybackRate, toggleMute
   } = usePlayerStore()
   const openPanel = useAgentStore((s) => s.openPanel)
 
@@ -22,7 +25,12 @@ export default function PlayerControls() {
 
   return (
     <div
-      className={`absolute bottom-0 left-0 right-0 px-6 py-3 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${
+      data-player-chrome="true"
+      onPointerEnter={onInteractionStart}
+      onPointerLeave={onInteractionEnd}
+      onFocusCapture={onInteractionStart}
+      onBlurCapture={onInteractionEnd}
+      className={`absolute z-30 bottom-0 left-0 right-0 px-6 py-3 bg-gradient-to-t from-black/90 to-transparent transition-opacity duration-300 ${
         controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}
     >
@@ -34,7 +42,11 @@ export default function PlayerControls() {
           min={0}
           max={duration || 100}
           value={currentTime}
-          onChange={(e) => seek(Number(e.target.value))}
+          onChange={(e) => {
+            const value = Number(e.target.value)
+            seek(value)
+            void window.aiPlayer?.player?.seek(value)
+          }}
           className="flex-1 h-1 accent-player-accent"
         />
         <span className="text-xs text-gray-400 w-10">{fmt(duration)}</span>
@@ -44,7 +56,13 @@ export default function PlayerControls() {
       <div className="flex items-center gap-4">
         {/* 1. 播放/暂停 */}
         <button
-          onClick={togglePlay}
+          title={isPlaying ? '暂停（空格）' : '播放（空格）'}
+          onClick={() => {
+            const nextPlaying = !usePlayerStore.getState().isPlaying
+            togglePlay()
+            if (nextPlaying) void window.aiPlayer?.player?.play()
+            else void window.aiPlayer?.player?.pause()
+          }}
           className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 text-xl"
         >
           {isPlaying ? '⏸' : '▶'}
@@ -52,16 +70,40 @@ export default function PlayerControls() {
 
         {/* 2. 音量 */}
         <div className="flex items-center gap-2">
-          <span className="text-lg">🔊</span>
+          <button
+            title="静音（M）"
+            onClick={() => {
+              toggleMute()
+              void window.aiPlayer?.player?.setVolume(usePlayerStore.getState().volume)
+            }}
+            className="text-lg"
+          >{volume === 0 ? '🔇' : volume < 45 ? '🔉' : '🔊'}</button>
           <input
             type="range"
             min={0}
             max={100}
             value={volume}
-            onChange={(e) => setVolume(Number(e.target.value))}
+            onChange={(e) => {
+              const value = Number(e.target.value)
+              setVolume(value)
+              void window.aiPlayer?.player?.setVolume(value)
+            }}
             className="w-20 h-1 accent-player-accent"
           />
         </div>
+
+        <select
+          title="播放速度"
+          value={playbackRate}
+          onChange={(e) => {
+            const value = Number(e.target.value)
+            setPlaybackRate(value)
+            void window.aiPlayer?.player?.setSpeed(value)
+          }}
+          className="bg-black/40 rounded px-2 py-1 text-xs outline-none"
+        >
+          {[0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}
+        </select>
 
         {/* 3. 字幕 */}
         <button
@@ -78,9 +120,12 @@ export default function PlayerControls() {
         {/* 4. 全屏 */}
         <button
           onClick={() => {
-            toggleFullscreen()
-            if (document.fullscreenElement) document.exitFullscreen()
-            else document.documentElement.requestFullscreen().catch(() => {})
+            if (window.aiPlayer?.windowControls) void window.aiPlayer.windowControls.setPreset('fullscreen')
+            else {
+              toggleFullscreen()
+              if (document.fullscreenElement) document.exitFullscreen()
+              else document.documentElement.requestFullscreen().catch(() => {})
+            }
           }}
           className="w-9 h-9 flex items-center justify-center rounded hover:bg-white/10"
         >

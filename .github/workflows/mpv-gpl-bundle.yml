@@ -1,0 +1,168 @@
+name: Build GPL mpv with Corresponding Source
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - .github/workflows/mpv-gpl-bundle.yml
+      - scripts/package-mpv-corresponding-source.ps1
+
+permissions:
+  contents: read
+
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    env:
+      CC: ccache clang
+      CXX: ccache clang++
+      CC_LD: lld-link
+      CXX_LD: lld-link
+      WINDRES: llvm-rc
+      RUST_LD: lld-link
+      RUSTC: rustc --target x86_64-pc-windows-msvc
+      CCACHE_BASEDIR: ${{ github.workspace }}\mpv-source
+      CCACHE_DIR: ${{ github.workspace }}\.ccache
+      CCACHE_MAXSIZE: 500M
+      MPV_COMMIT: 41f6a645068483470267271e1d09966ca3b9f413
+      SHADERC_COMMIT: e0a5092b4b05dbcc448b0883f3575163634f8e86
+      FFMPEG_MESON_COMMIT: f853d12725d9ade9f73ab39a43f38147d530e884
+      LIBASS_COMMIT: cbb743215bad0fe202477e569fe8005545258ccd
+      LIBPLACEBO_COMMIT: 47587a2d47299f7261a01b77e989b74f80a99769
+      DAV1D_COMMIT: 43f3b8d33bae5179a134d1cd7c394063b1cebfcb
+      SPIRV_CROSS_COMMIT: 28184c1e138f18c330256eeb2f56b9f9fbc53921
+      VULKAN_LOADER_COMMIT: 7a07afe04ad134d4eabe25f62720177f60ed6627
+      LIBJXL_COMMIT: 53042ec537712e0df08709524f4df097d42174bc
+      AOM_COMMIT: 36d919cd32766f8fefae7abf5c754d883d7b2ab4
+      WRAPDB_COMMIT: 9aeb67cda4af3b70caa155374271a56ad74f7ee5
+
+    steps:
+      - name: Disable automatic line-ending conversion
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Check out redistributor recipes
+        uses: actions/checkout@v7
+        with:
+          path: ai-player
+
+      - name: Check out exact mpv source
+        uses: actions/checkout@v7
+        with:
+          repository: mpv-player/mpv
+          ref: ${{ env.MPV_COMMIT }}
+          fetch-depth: 1
+          path: mpv-source
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Locate Visual Studio C++ tools
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs -or -not (Test-Path -LiteralPath $vs)) {
+            throw 'Visual Studio C++ tools were not found on the runner.'
+          }
+          "VS=$vs" >> $env:GITHUB_ENV
+
+      - name: Install build tools
+        shell: pwsh
+        working-directory: mpv-source
+        run: |
+          python -m pip install meson==1.9.2
+          choco install ccache nasm --no-progress -y
+          ./ci/install-cmake.ps1 -arch x64
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: mpv-windows-x64-${{ env.MPV_COMMIT }}-ccache-v1
+
+      - name: Pin every moving source dependency
+        shell: pwsh
+        working-directory: mpv-source
+        run: |
+          function Clone-Pinned([string]$Url, [string]$Path, [string]$Commit) {
+            git clone --filter=blob:none --no-checkout $Url $Path
+            git -C $Path checkout --detach $Commit
+            git -C $Path submodule update --init --recursive --depth 1
+          }
+
+          New-Item -Path subprojects -ItemType Directory -Force | Out-Null
+          Clone-Pinned 'https://github.com/google/shaderc' 'subprojects/shaderc_cmake' $env:SHADERC_COMMIT
+          $shaderThirdParty = 'subprojects/shaderc_cmake/third_party/CMakeLists.txt'
+          $shaderText = Get-Content -LiteralPath $shaderThirdParty -Raw
+          $unsupported = '    set(GLSLANG_ENABLE_INSTALL $<NOT:${SKIP_GLSLANG_INSTALL}>)'
+          if (-not $shaderText.Contains($unsupported)) {
+            throw 'Expected shaderc GLSlang install expression was not found.'
+          }
+          $compatible = @(
+            '    if (SKIP_GLSLANG_INSTALL)'
+            '      set(GLSLANG_ENABLE_INSTALL OFF)'
+            '    else()'
+            '      set(GLSLANG_ENABLE_INSTALL ON)'
+            '    endif()'
+          ) -join "`n"
+          $shaderText.Replace($unsupported, $compatible) |
+            Set-Content -LiteralPath $shaderThirdParty -Encoding utf8 -NoNewline
+          Clone-Pinned 'https://gitlab.freedesktop.org/gstreamer/meson-ports/ffmpeg.git' 'subprojects/ffmpeg' $env:FFMPEG_MESON_COMMIT
+          Clone-Pinned 'https://github.com/libass/libass' 'subprojects/libass' $env:LIBASS_COMMIT
+          Clone-Pinned 'https://code.videolan.org/videolan/libplacebo.git' 'subprojects/libplacebo' $env:LIBPLACEBO_COMMIT
+          Clone-Pinned 'https://code.videolan.org/videolan/dav1d' 'subprojects/dav1d' $env:DAV1D_COMMIT
+          Clone-Pinned 'https://github.com/KhronosGroup/SPIRV-Cross' 'subprojects/spirv-cross' $env:SPIRV_CROSS_COMMIT
+          Clone-Pinned 'https://github.com/KhronosGroup/Vulkan-Loader' 'subprojects/vulkan-loader' $env:VULKAN_LOADER_COMMIT
+          Clone-Pinned 'https://github.com/libjxl/libjxl' 'subprojects/libjxl-cmake' $env:LIBJXL_COMMIT
+          Clone-Pinned 'https://aomedia.googlesource.com/aom' 'subprojects/aom-cmake' $env:AOM_COMMIT
+
+          git clone --filter=blob:none --no-checkout https://github.com/mesonbuild/wrapdb ../wrapdb
+          git -C ../wrapdb checkout --detach $env:WRAPDB_COMMIT
+          Get-ChildItem -LiteralPath '../wrapdb/subprojects' -File -Filter '*.wrap' |
+            Copy-Item -Destination 'subprojects' -Force
+          $wrapPatches = '../wrapdb/subprojects/packagefiles'
+          if (Test-Path -LiteralPath $wrapPatches) {
+            Copy-Item -LiteralPath $wrapPatches -Destination 'subprojects' -Recurse -Force
+          }
+
+      - name: Build exact GPL binary
+        shell: pwsh
+        working-directory: mpv-source
+        run: |
+          $env:PATH = ($env:PATH -split ';' | Where-Object {
+            $_ -ne 'C:\Program Files\LLVM\bin' -and
+            $_ -ne 'C:\Program Files\CMake\bin' -and
+            $_ -ne 'C:\Strawberry\c\bin'
+          }) -join ';'
+          $env:PATH = "$pwd\cmake\bin;" + $env:PATH + ';C:\Program Files\NASM'
+          Import-Module "$env:VS\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $env:VS -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          ./ci/build-win32.ps1
+
+      - name: Package binary and complete corresponding source
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd\mpv-source\cmake\bin;" + $env:PATH + ';C:\Program Files\NASM'
+          Import-Module "$env:VS\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $env:VS -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64'
+          ./ai-player/scripts/package-mpv-corresponding-source.ps1 `
+            -MpvRoot ./mpv-source `
+            -RedistributorRoot ./ai-player `
+            -OutputDir ./gpl-artifacts
+
+      - name: Upload matched binary and source evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: mpv-v0.41.0-windows-x64-gpl-complete
+          path: gpl-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

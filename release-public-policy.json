@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "sourceRelease": {
+    "allowed": true,
+    "reason": "项目自有源码可按 Apache-2.0 发布；忽略的模型和原生二进制不进入 Git。"
+  },
+  "binaryRelease": {
+    "allowed": false,
+    "reason": "mpv/FFmpeg 官方 GPL 构建的完整对应源码包尚未托管并写入固定 URL、大小和 SHA-256。",
+    "requiredEvidence": [
+      "correspondingSourceUrl",
+      "correspondingSourceBytes",
+      "correspondingSourceSha256"
+    ]
+  }
+}

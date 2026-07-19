@@ -1,13 +1,17 @@
 const http = require('http')
 const os = require('os')
+const fs = require('fs')
+const path = require('path')
 
 class SyncService {
-  constructor() {
+  constructor(storagePath = null) {
     this.server = null
     this.port = 18902
     this.deviceId = os.hostname()
     this.peerUrl = null
-    this.progress = {}
+    this.peerToken = null
+    this.storagePath = storagePath
+    this.progress = this.loadProgress()
     this.token = require('crypto').randomUUID()
   }
 
@@ -15,7 +19,30 @@ class SyncService {
     return require('./utils').getLanIp()
   }
 
-  start() {
+  loadProgress() {
+    if (!this.storagePath) return {}
+    try {
+      const parsed = JSON.parse(fs.readFileSync(this.storagePath, 'utf8'))
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+
+  saveProgress() {
+    if (!this.storagePath) return
+    try {
+      fs.mkdirSync(path.dirname(this.storagePath), { recursive: true })
+      const tempPath = `${this.storagePath}.tmp`
+      fs.writeFileSync(tempPath, JSON.stringify(this.progress), 'utf8')
+      fs.renameSync(tempPath, this.storagePath)
+    } catch {
+      // Progress sync must not break playback if persistence is unavailable.
+    }
+  }
+
+  async start() {
+    if (this.server) return this.getUrl()
     this.server = http.createServer((req, res) => {
       const url = new URL(req.url, 'http://localhost')
       if (url.searchParams.get('token') !== this.token) {
@@ -23,7 +50,7 @@ class SyncService {
       }
       this.handle(req, res)
     })
-    this.server.listen(this.port)
+    this.port = await require('./utils').listenWithFallback(this.server, this.port)
     return this.getUrl()
   }
 
@@ -37,8 +64,19 @@ class SyncService {
       res.end(JSON.stringify({ deviceId: this.deviceId, progress: this.progress }))
     } else if (req.method === 'POST') {
       let body = ''
-      req.on('data', (c) => (body += c))
+      let tooLarge = false
+      req.on('data', (c) => {
+        if (tooLarge) return
+        body += c
+        if (Buffer.byteLength(body) > 1024 * 1024) {
+          tooLarge = true
+          res.writeHead(413)
+          res.end('payload too large')
+          req.destroy()
+        }
+      })
       req.on('end', () => {
+        if (tooLarge) return
         try {
           const data = JSON.parse(body)
           for (const [hash, val] of Object.entries(data.progress || {})) {
@@ -47,6 +85,7 @@ class SyncService {
               this.progress[hash] = v
             }
           }
+          this.saveProgress()
           res.writeHead(200)
           res.end('ok')
         } catch {
@@ -60,11 +99,12 @@ class SyncService {
   async upload() {
     if (!this.peerUrl) return { error: '未配置对端设备' }
     try {
-      await fetch(this.peerUrl + '/progress', {
+      const resp = await fetch(this.peerEndpoint('/progress'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deviceId: this.deviceId, progress: this.progress })
       })
+      if (!resp.ok) return { error: `对端拒绝同步（HTTP ${resp.status}）` }
       return { success: true, count: Object.keys(this.progress).length }
     } catch (e) {
       return { error: String(e) }
@@ -74,7 +114,8 @@ class SyncService {
   async download() {
     if (!this.peerUrl) return { error: '未配置对端设备' }
     try {
-      const resp = await fetch(this.peerUrl + '/progress')
+      const resp = await fetch(this.peerEndpoint('/progress'))
+      if (!resp.ok) return { error: `对端拒绝同步（HTTP ${resp.status}）` }
       const data = await resp.json()
       for (const [hash, val] of Object.entries(data.progress || {})) {
         const v = val
@@ -82,6 +123,7 @@ class SyncService {
           this.progress[hash] = v
         }
       }
+      this.saveProgress()
       return { success: true, count: Object.keys(data.progress || {}).length }
     } catch (e) {
       return { error: String(e) }
@@ -90,6 +132,7 @@ class SyncService {
 
   setProgress(hash, position, preferences) {
     this.progress[hash] = { position, preferences, updatedAt: Date.now() }
+    this.saveProgress()
   }
 
   getProgress(hash) {
@@ -97,11 +140,28 @@ class SyncService {
   }
 
   setPeer(url) {
-    this.peerUrl = url
+    try {
+      const parsed = new URL(url)
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('仅支持 http/https')
+      this.peerUrl = parsed.origin
+      this.peerToken = parsed.searchParams.get('token')
+      return true
+    } catch (e) {
+      this.peerUrl = null
+      this.peerToken = null
+      return false
+    }
+  }
+
+  peerEndpoint(pathname) {
+    const endpoint = new URL(pathname, this.peerUrl)
+    if (this.peerToken) endpoint.searchParams.set('token', this.peerToken)
+    return endpoint.toString()
   }
 
   stop() {
     if (this.server) this.server.close()
+    this.server = null
   }
 }
 

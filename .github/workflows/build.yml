@@ -1,39 +1,36 @@
-name: Build All Platforms
+name: Source Quality Gate
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - master
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  source-quality:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
-      - run: npm install -g pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsc --noEmit
-      - name: Build Windows
-        if: matrix.os == 'windows-latest'
-        run: pnpm build:electron
-      - name: Build macOS
-        if: matrix.os == 'macos-latest'
-        run: pnpm exec electron-builder --mac dmg
-      - name: Build Linux
-        if: matrix.os == 'ubuntu-latest'
-        run: pnpm exec electron-builder --linux AppImage deb
-      - uses: actions/upload-artifact@v4
+      - uses: pnpm/action-setup@v6
         with:
-          name: AIPlayer-${{ matrix.os }}
+          version: 10.32.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm audit --prod --registry=https://registry.npmjs.org
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: source-quality-evidence
           path: |
-            release/*.exe
-            release/*.dmg
-            release/*.AppImage
-            release/*.deb
+            release/security-release-scan.json
+            dist/manifest.webmanifest
+          if-no-files-found: warn

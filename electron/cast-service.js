@@ -3,12 +3,14 @@ const http = require('http')
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
+const crypto = require('crypto')
 
 class CastService {
   constructor() {
     this.devices = []
     this.fileServer = null
     this.fileServerPort = 18901
+    this.servedFiles = new Map()
   }
 
   getLanIp() {
@@ -18,13 +20,14 @@ class CastService {
   scan() {
     return new Promise((resolve) => {
       this.devices = []
-      const socket = dgram.createSocket('udp4')
+      const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
       const msg =
         'M-SEARCH * HTTP/1.1\r\n' +
         'HOST: 239.255.255.250:1900\r\n' +
         'MAN: "ssdp:discover"\r\n' +
         'MX: 3\r\n' +
         'ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n'
+      socket.on('error', () => {})
       socket.bind(() => {
         socket.setBroadcast(true)
         socket.send(msg, 1900, '239.255.255.250')
@@ -48,7 +51,7 @@ class CastService {
 
   async parseDevice(location) {
     try {
-      const resp = await fetch(location)
+      const resp = await fetch(location, { signal: AbortSignal.timeout(5000) })
       const xml = await resp.text()
       const nameMatch = xml.match(/<friendlyName>([^<]+)<\/friendlyName>/)
       const ctrlMatch = xml.match(
@@ -60,46 +63,69 @@ class CastService {
         id: location,
         name: nameMatch ? nameMatch[1] : 'DLNA设备',
         location,
-        controlUrl: baseUrl.origin + ctrlMatch[1]
+        controlUrl: new URL(ctrlMatch[1], baseUrl).toString()
       }
     } catch {
       return null
     }
   }
 
-  startFileServer() {
+  async startFileServer() {
     if (this.fileServer) return
     this.fileServer = http.createServer((req, res) => {
-      const filePath = decodeURIComponent(req.url.slice(1))
-      const allowedRoots = [
-        path.join(os.homedir(), 'Videos'),
-        path.join(os.homedir(), 'Movies'),
-        path.join(os.homedir(), '视频')
-      ]
-      const resolved = path.resolve(filePath)
-      const normalized = resolved.toLowerCase()
-      if (
-        !filePath ||
-        !allowedRoots.some((d) => normalized === d.toLowerCase() || normalized.startsWith(d.toLowerCase() + path.sep))
-      ) {
+      const requestUrl = new URL(req.url, 'http://localhost')
+      const match = requestUrl.pathname.match(/^\/media\/([a-f0-9-]+)\//i)
+      const entry = match ? this.servedFiles.get(match[1]) : null
+      if (!entry || entry.expiresAt < Date.now()) {
         res.writeHead(403)
         res.end('forbidden')
         return
       }
-      if (fs.existsSync(resolved)) {
-        const stat = fs.statSync(resolved)
-        res.writeHead(200, {
-          'Content-Length': stat.size,
-          'Content-Type': 'video/mp4',
-          'Accept-Ranges': 'bytes'
-        })
-        fs.createReadStream(resolved).pipe(res)
-      } else {
+      const resolved = entry.path
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
         res.writeHead(404)
         res.end()
+        return
       }
+      const stat = fs.statSync(resolved)
+      const range = req.headers.range?.match(/^bytes=(\d*)-(\d*)$/)
+      const start = range && range[1] ? Number(range[1]) : 0
+      const end = range && range[2] ? Math.min(Number(range[2]), stat.size - 1) : stat.size - 1
+      if (start < 0 || end < start || start >= stat.size) {
+        res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+        res.end()
+        return
+      }
+      const headers = {
+        'Content-Length': end - start + 1,
+        'Content-Type': this.mimeType(resolved),
+        'Accept-Ranges': 'bytes'
+      }
+      if (range) headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`
+      res.writeHead(range ? 206 : 200, headers)
+      if (req.method === 'HEAD') res.end()
+      else fs.createReadStream(resolved, { start, end }).pipe(res)
     })
-    this.fileServer.listen(this.fileServerPort)
+    this.fileServerPort = await require('./utils').listenWithFallback(this.fileServer, this.fileServerPort)
+  }
+
+  mimeType(filePath) {
+    const ext = path.extname(filePath).toLowerCase()
+    return ({
+      '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mkv': 'video/x-matroska',
+      '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.flac': 'audio/flac',
+      '.wav': 'audio/wav', '.m4a': 'audio/mp4'
+    })[ext] || 'application/octet-stream'
+  }
+
+  registerFile(filePath) {
+    const resolved = path.resolve(filePath)
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      throw new Error('投屏文件不存在')
+    }
+    const token = crypto.randomUUID()
+    this.servedFiles.set(token, { path: resolved, expiresAt: Date.now() + 12 * 60 * 60 * 1000 })
+    return `http://${this.getLanIp()}:${this.fileServerPort}/media/${token}/${encodeURIComponent(path.basename(resolved))}`
   }
 
   async cast(deviceId, filePath) {
@@ -107,8 +133,14 @@ class CastService {
     if (!device) {
       return { success: false, error: '设备未找到，请先扫描' }
     }
-    this.startFileServer()
-    const mediaUrl = `http://${this.getLanIp()}:${this.fileServerPort}/${encodeURIComponent(filePath)}`
+    await this.startFileServer()
+    let mediaUrl
+    try {
+      mediaUrl = this.registerFile(filePath)
+    } catch (e) {
+      return { success: false, error: String(e) }
+    }
+    const xmlMediaUrl = mediaUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;')
     const body =
       '<?xml version="1.0"?>' +
       '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" ' +
@@ -116,7 +148,7 @@ class CastService {
       '<s:Body>' +
       '<u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">' +
       '<InstanceID>0</InstanceID>' +
-      `<CurrentURI>${mediaUrl}</CurrentURI>` +
+      `<CurrentURI>${xmlMediaUrl}</CurrentURI>` +
       '<CurrentURIMetaData></CurrentURIMetaData>' +
       '</u:SetAVTransportURI></s:Body></s:Envelope>'
     try {
@@ -130,7 +162,8 @@ class CastService {
       })
       if (resp.ok) {
         const playBody = '<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"><InstanceID>0</InstanceID><Speed>1</Speed></u:Play></s:Body></s:Envelope>'
-        await fetch(device.controlUrl, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset="utf-8"', SOAPAction: '"urn:schemas-upnp-org:service:AVTransport:1#Play"' }, body: playBody })
+        const playResp = await fetch(device.controlUrl, { method: 'POST', headers: { 'Content-Type': 'text/xml; charset="utf-8"', SOAPAction: '"urn:schemas-upnp-org:service:AVTransport:1#Play"' }, body: playBody })
+        if (!playResp.ok) return { success: false, error: `设备已接收文件但播放失败（HTTP ${playResp.status}）` }
       }
       return {
         success: resp.ok,
@@ -143,6 +176,8 @@ class CastService {
 
   stop() {
     if (this.fileServer) this.fileServer.close()
+    this.fileServer = null
+    this.servedFiles.clear()
   }
 }
 

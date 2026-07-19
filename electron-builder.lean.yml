@@ -1,0 +1,37 @@
+appId: com.aiplayer.app
+productName: AI播放器
+asar: true
+compression: normal
+npmRebuild: false
+files:
+  - dist/**/*
+  - electron/**/*
+extraResources:
+  - from: resources/bin/win
+    to: bin/win
+    filter:
+      - mpv.exe
+      - mpv.com
+      - vulkan-1.dll
+      - ai-player-voice.exe
+  - from: LICENSE
+    to: legal/LICENSE
+  - from: THIRD_PARTY_NOTICES.md
+    to: legal/THIRD_PARTY_NOTICES.md
+  - from: PRIVACY.md
+    to: legal/PRIVACY.md
+  - from: resources/licenses/mpv
+    to: licenses/mpv
+directories:
+  output: release
+win:
+  icon: resources/icons/app-icon.ico
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  include: build/installer.nsh
+  installerIcon: resources/icons/app-icon.ico
+  uninstallerIcon: resources/icons/app-icon.ico
+  artifactName: AI播放器标准版安装包-${version}.${ext}

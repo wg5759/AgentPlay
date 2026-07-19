@@ -1,6 +1,11 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
-export default function Recorder() {
+interface Props {
+  trigger?: number
+  hidden?: boolean
+}
+
+export default function Recorder({ trigger = 0, hidden = false }: Props) {
   const [recording, setRecording] = useState(false)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -36,14 +41,22 @@ export default function Recorder() {
     setRecording(false)
   }
 
+  useEffect(() => {
+    if (!trigger) return
+    if (recorderRef.current?.state === 'recording') stop()
+    else void start()
+  }, [trigger])
+
+  if (hidden && !recording) return null
+
   return (
     <button
       onClick={recording ? stop : start}
-      className={`px-3 py-2 rounded-lg text-sm ${
+      className={`${hidden ? 'fixed z-[65] right-5 top-5 shadow-xl' : ''} px-3 py-2 rounded-lg text-sm ${
         recording ? 'bg-red-500 animate-pulse' : 'bg-player-surface hover:ring-1 ring-player-accent'
       }`}
     >
-      {recording ? '⏹ 停止' : '⏺ 录制'}
+      {recording ? '⏹ 正在录制 · 点击停止' : '⏺ 录制'}
     </button>
   )
 }

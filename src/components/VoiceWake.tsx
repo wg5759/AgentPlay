@@ -12,10 +12,12 @@ interface SpeechRecognitionInstance {
   stop: () => void
 }
 
-export default function VoiceWake() {
+export default function VoiceWake({ enabled }: { enabled: boolean }) {
   const openPanel = useAgentStore((s) => s.openPanel)
+  const panelOpen = useAgentStore((s) => s.open)
 
   useEffect(() => {
+    if (!enabled || panelOpen) return
     const w = window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionInstance
       webkitSpeechRecognition?: new () => SpeechRecognitionInstance
@@ -29,10 +31,11 @@ export default function VoiceWake() {
     rec.continuous = true
     rec.lang = 'zh-CN'
     rec.interimResults = false
+    let active = true
     rec.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const text = e.results[i][0].transcript
-        if (text.includes('播放器') || text.includes('嘿')) {
+        if (/嘿[，,\s]*播放器/.test(text)) {
           openPanel()
         }
       }
@@ -40,12 +43,14 @@ export default function VoiceWake() {
     let retries = 0
     const MAX_RETRIES = 5
     rec.onerror = () => {
-      if (retries++ < MAX_RETRIES) {
+      if (active && retries++ < MAX_RETRIES) {
         setTimeout(() => { try { rec.start() } catch { /* */ } }, 1000 * retries)
       }
     }
     rec.onend = () => {
-      try { rec.start() } catch { /* */ }
+      if (active && retries < MAX_RETRIES) {
+        setTimeout(() => { try { rec.start() } catch { /* */ } }, 500)
+      }
     }
     try {
       rec.start()
@@ -54,9 +59,10 @@ export default function VoiceWake() {
       console.warn('[VoiceWake] 启动失败（可能需授权麦克风）')
     }
     return () => {
+      active = false
       try { rec.stop() } catch { /* */ }
     }
-  }, [openPanel])
+  }, [enabled, openPanel, panelOpen])
 
   return null
 }

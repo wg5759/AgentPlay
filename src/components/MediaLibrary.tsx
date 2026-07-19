@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useAgentStore } from '../stores/agentStore'
 import Recorder from './Recorder'
+import { usePlayerStore } from '../stores/playerStore'
 
 interface MediaFile {
   name: string
@@ -13,9 +14,10 @@ interface MediaFile {
 
 interface Props {
   onPlay: (name: string, path: string) => void
+  rootDir?: string
 }
 
-export default function MediaLibrary({ onPlay }: Props) {
+export default function MediaLibrary({ onPlay, rootDir }: Props) {
   const openPanel = useAgentStore((s) => s.openPanel)
   const [files, setFiles] = useState<MediaFile[]>([])
   const [activeTag, setActiveTag] = useState<string | null>(null)
@@ -38,10 +40,20 @@ export default function MediaLibrary({ onPlay }: Props) {
   const [castFile, setCastFile] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [syncUrl, setSyncUrl] = useState<string | null>(null)
+  const [dlnaServerUrl, setDlnaServerUrl] = useState<string | null>(null)
+  const [receiverEnabled, setReceiverEnabled] = useState(false)
   const [peerUrl, setPeerUrl] = useState('')
   const [syncStatus, setSyncStatus] = useState('')
   const [urlInput, setUrlInput] = useState('')
   const [showMore, setShowMore] = useState(false)
+  const [posters, setPosters] = useState<Record<string, { poster: string | null; title: string; overview: string; year: string | null }>>(() => {
+    try { return JSON.parse(localStorage.getItem('aiplayer_metadata_cache') || '{}') } catch { return {} }
+  })
+  const [metadataStatus, setMetadataStatus] = useState('')
+  const [recordTrigger, setRecordTrigger] = useState(0)
+  const recentMedia = usePlayerStore((state) => state.recentMedia)
+  const favorites = usePlayerStore((state) => state.favorites)
+  const toggleFavorite = usePlayerStore((state) => state.toggleFavorite)
 
   const addNetworkSource = () => {
     const url = urlInput.trim()
@@ -69,9 +81,46 @@ export default function MediaLibrary({ onPlay }: Props) {
     setShowMore(true)
   }
 
+  const handleMetadata = async () => {
+    const apiKey = localStorage.getItem('aiplayer_tmdb_key') || ''
+    if (!apiKey) {
+      setMetadataStatus('请先在 Agent 配置里填写 TMDB key')
+      return
+    }
+    const videos = files.filter((f) => ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.wmv'].includes(f.ext)).slice(0, 30)
+    if (videos.length === 0) {
+      setMetadataStatus('媒体库里没有可刮削的视频')
+      return
+    }
+    setMetadataStatus(`正在刮削 0/${videos.length}…`)
+    const next = { ...posters }
+    let completed = 0
+    for (let i = 0; i < videos.length; i += 3) {
+      const batch = videos.slice(i, i + 3)
+      await Promise.all(batch.map(async (file) => {
+        const query = file.name
+          .replace(/\.[^.]+$/, '')
+          .replace(/[._]/g, ' ')
+          .replace(/\b(19|20)\d{2}\b.*$/, '')
+          .replace(/\[[^\]]+\]|\([^)]*\)/g, '')
+          .trim()
+        const result = await window.aiPlayer?.tmdb?.search(query, apiKey)
+        if (result?.success && result.data) next[file.path] = result.data
+        completed += 1
+        setMetadataStatus(`正在刮削 ${completed}/${videos.length}…`)
+      }))
+      setPosters({ ...next })
+      localStorage.setItem('aiplayer_metadata_cache', JSON.stringify(next))
+    }
+    setMetadataStatus(`海报刮削完成：匹配 ${Object.keys(next).length}/${videos.length}`)
+  }
+
   const handleSync = async (action: 'upload' | 'download') => {
     if (!window.aiPlayer?.sync) return
-    if (peerUrl) await window.aiPlayer.sync.setPeer(peerUrl)
+    if (peerUrl && !(await window.aiPlayer.sync.setPeer(peerUrl))) {
+      setSyncStatus('失败: 对端 URL 无效，请粘贴完整配对地址')
+      return
+    }
     setSyncStatus(action === 'upload' ? '上传中…' : '下载中…')
     const result = await window.aiPlayer.sync[action]()
     setSyncStatus(result.error ? `失败: ${result.error}` : `成功（${result.count || 0}条）`)
@@ -104,27 +153,58 @@ export default function MediaLibrary({ onPlay }: Props) {
 
   const isDesktop = window.aiPlayer?.isElectron === true
 
-  useEffect(() => {
-    if (isDesktop && window.aiPlayer?.wifi) {
-      window.aiPlayer.wifi.url().then(setWifiUrl)
-      window.aiPlayer.wifi.pin().then(setWifiPin)
+  const enableWifi = async () => {
+    const url = await window.aiPlayer?.wifi?.url()
+    setWifiUrl(url || null)
+    setWifiPin(url ? await window.aiPlayer?.wifi?.pin() || null : null)
+  }
+
+  const disableWifi = async () => {
+    await window.aiPlayer?.wifi?.stop()
+    setWifiUrl(null)
+    setWifiPin(null)
+  }
+
+  const enableSync = async () => setSyncUrl(await window.aiPlayer?.sync?.url() || null)
+  const disableSync = async () => { await window.aiPlayer?.sync?.stop(); setSyncUrl(null) }
+  const enableDlnaServer = async () => setDlnaServerUrl(await window.aiPlayer?.dlna?.serverUrl() || null)
+  const disableDlnaServer = async () => { await window.aiPlayer?.dlna?.stopServer(); setDlnaServerUrl(null) }
+  const toggleReceiver = async () => {
+    if (!window.aiPlayer?.receiver) return
+    if (receiverEnabled) {
+      await window.aiPlayer.receiver.stop()
+      setReceiverEnabled(false)
+    } else {
+      setReceiverEnabled(Boolean(await window.aiPlayer.receiver.start()))
     }
-    if (isDesktop && window.aiPlayer?.sync) {
-      window.aiPlayer.sync.url().then(setSyncUrl)
-    }
-  }, [])
+  }
 
   useEffect(() => {
     if (!isDesktop || !window.aiPlayer?.media) return
     setLoading(true)
     window.aiPlayer.media
-      .analyze()
+      .analyze(rootDir)
       .then((result) => {
         setFiles(result.files)
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [])
+  }, [isDesktop, rootDir])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const action = (event as CustomEvent<string>).detail
+      if (action === 'network-source') setShowAddUrl(true)
+      else if (action === 'record') setRecordTrigger((value) => value + 1)
+      else if (action === 'dedup') void handleDedup()
+      else if (action === 'organize') void handleSuggest()
+      else if (action === 'plugins') void handlePlugins()
+      else if (action === 'poster') void handleMetadata()
+      else if (action === 'devices') setShowMore(true)
+    }
+    window.addEventListener('ai-player-action', handler)
+    return () => window.removeEventListener('ai-player-action', handler)
+  })
 
   const allTags = [...new Set(files.flatMap((f) => f.tags || []))]
   const filtered = (activeTag ? files.filter((f) => f.tags?.includes(activeTag)) : files).filter(
@@ -173,25 +253,10 @@ export default function MediaLibrary({ onPlay }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder='搜索或说"放谍战剧"…'
-          className="flex-1 max-w-md bg-player-surface rounded-lg px-4 py-2 text-sm outline-none focus:ring-1 ring-player-accent"
+          className="flex-1 bg-player-surface rounded-xl px-4 py-3 text-sm outline-none focus:ring-1 ring-player-accent"
         />
-        <button
-          onClick={() => setShowAddUrl(!showAddUrl)}
-          className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent"
-        >
-          + 网络源
-        </button>
-        <Recorder />
-        <button onClick={handleDedup} className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent">去重</button>
-        <button onClick={handleSuggest} className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent">粗剪</button>
-        <button onClick={handlePlugins} className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent">插件</button>
-        <button
-          onClick={() => setShowMore(!showMore)}
-          className="px-3 py-2 bg-player-surface rounded-lg text-sm hover:ring-1 ring-player-accent"
-        >
-          {showMore ? '收起' : '更多'}
-        </button>
       </div>
+      <Recorder trigger={recordTrigger} hidden />
       {showAddUrl && (
         <div className="flex items-center gap-2 px-6 pb-2">
           <input
@@ -209,6 +274,7 @@ export default function MediaLibrary({ onPlay }: Props) {
       )}
 
       <div className="flex-1 overflow-y-auto px-6 pb-6">
+        {metadataStatus && <p className="text-xs text-gray-400 mb-3">{metadataStatus}</p>}
         {dedupResults && dedupResults.length > 0 && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">🔍 去重结果（{dedupResults.length} 组重复）</p>
@@ -219,7 +285,7 @@ export default function MediaLibrary({ onPlay }: Props) {
         )}
         {suggestResults && suggestResults.length > 0 && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
-            <p className="text-sm">🎬 粗剪建议</p>
+            <p className="text-sm">🎬 素材整理建议</p>
             {suggestResults.map((s, i) => (
               <p key={i} className="text-xs text-gray-500 mt-1">{s.suggestion}</p>
             ))}
@@ -228,6 +294,7 @@ export default function MediaLibrary({ onPlay }: Props) {
         {plugins && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">🧩 插件（{plugins.length}）</p>
+            <button onClick={() => void window.aiPlayer?.plugin?.openFolder()} className="text-xs text-player-accent mt-1">打开插件目录</button>
             {plugins.length === 0 ? (
               <p className="text-xs text-gray-500 mt-1">将插件放入 ~/.ai-player/plugins/</p>
             ) : (
@@ -237,18 +304,22 @@ export default function MediaLibrary({ onPlay }: Props) {
             )}
           </div>
         )}
-        {showMore && wifiUrl && (
+        {showMore && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">📱 WiFi 传文件</p>
-            <p className="text-xs text-gray-500 mt-1">手机浏览器访问：{wifiUrl}</p>
-            <p className="text-xs text-gray-500">配对 PIN：{wifiPin || '...'}</p>
+            {wifiUrl ? <>
+              <p className="text-xs text-gray-500 mt-1">手机浏览器访问：{wifiUrl}</p>
+              <p className="text-xs text-gray-500">配对 PIN：{wifiPin || '...'}</p>
+              <button onClick={() => void disableWifi()} className="mt-2 px-3 py-1 bg-white/10 rounded text-xs">停止共享</button>
+            </> : <button onClick={() => void enableWifi()} className="mt-2 px-3 py-1 bg-player-accent rounded text-xs">启用 WiFi 传文件</button>}
           </div>
         )}
-        {showMore && syncUrl && (
+        {showMore && (
           <div className="mb-6 bg-player-surface rounded-lg p-4">
             <p className="text-sm">🔄 跨设备同步</p>
-            <p className="text-xs text-gray-500 mt-1">本机：{syncUrl}</p>
-            <div className="flex items-center gap-2 mt-2">
+            {syncUrl ? <>
+              <p className="text-xs text-gray-500 mt-1">本机：{syncUrl}</p>
+              <div className="flex items-center gap-2 mt-2">
               <input
                 type="text"
                 value={peerUrl}
@@ -258,8 +329,22 @@ export default function MediaLibrary({ onPlay }: Props) {
               />
               <button onClick={() => handleSync('download')} className="px-2 py-1 bg-player-accent rounded text-xs">拉取</button>
               <button onClick={() => handleSync('upload')} className="px-2 py-1 bg-player-accent rounded text-xs">推送</button>
-            </div>
-            {syncStatus && <p className="text-xs text-gray-500 mt-1">{syncStatus}</p>}
+              </div>
+              <button onClick={() => void disableSync()} className="mt-2 px-3 py-1 bg-white/10 rounded text-xs">停止同步服务</button>
+              {syncStatus && <p className="text-xs text-gray-500 mt-1">{syncStatus}</p>}
+            </> : <button onClick={() => void enableSync()} className="mt-2 px-3 py-1 bg-player-accent rounded text-xs">启用跨设备同步</button>}
+          </div>
+        )}
+        {showMore && (
+          <div className="mb-6 bg-player-surface rounded-lg p-4">
+            <p className="text-sm">📺 DLNA 共享与接收</p>
+            {dlnaServerUrl ? <>
+              <p className="text-xs text-gray-500 mt-1">媒体库地址：{dlnaServerUrl}</p>
+              <button onClick={() => void disableDlnaServer()} className="mt-2 px-3 py-1 bg-white/10 rounded text-xs">停止共享媒体库</button>
+            </> : <button onClick={() => void enableDlnaServer()} className="mt-2 px-3 py-1 bg-player-accent rounded text-xs">启用媒体库共享</button>}
+            <button onClick={() => void toggleReceiver()} className={`mt-2 ml-2 px-3 py-1 rounded text-xs ${receiverEnabled ? 'bg-red-700' : 'bg-player-accent'}`}>
+              {receiverEnabled ? '停止接收投屏' : '启用接收投屏'}
+            </button>
           </div>
         )}
         {showMore && networkSources.length > 0 && (
@@ -310,17 +395,46 @@ export default function MediaLibrary({ onPlay }: Props) {
             ))}
           </div>
         )}
+        {recentMedia.length > 0 && !query && !activeTag && (
+          <div className="mb-6">
+            <h2 className="text-gray-400 text-sm mb-3">最近播放</h2>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {recentMedia.slice(0, 8).map((item) => (
+                <button key={item.src} onClick={() => onPlay(item.name, item.src)} className="min-w-[180px] max-w-[240px] bg-player-surface rounded-xl px-4 py-3 text-left hover:ring-1 ring-player-accent">
+                  <span className="block text-sm truncate">▶ {item.name}</span>
+                  <span className="block text-[11px] text-gray-600 mt-1">{new Date(item.openedAt).toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <h2 className="text-gray-400 text-sm mb-3">
           {isDesktop ? `媒体库（${files.length}）` : '媒体库（Web 端示例）'}
         </h2>
         {loading ? (
           <p className="text-gray-500 text-sm">扫描中…</p>
         ) : filtered.length === 0 ? (
-          <p className="text-gray-600 text-sm">
-            {isDesktop
-              ? '未找到视频文件，可拖拽文件到播放区'
-              : 'Web 端请拖拽视频文件到播放区'}
-          </p>
+          <div className="min-h-[280px] rounded-2xl border border-dashed border-white/15 bg-white/[0.02] flex flex-col items-center justify-center text-center px-6">
+            <div className="text-4xl mb-4">🎞️</div>
+            <p className="text-gray-300 text-base mb-2">这里还没有媒体文件</p>
+            <p className="text-gray-500 text-sm mb-5">拖入文件，或从“文件”菜单打开文件 / 文件夹</p>
+            <div className="flex gap-3">
+              <button
+                onClick={async () => {
+                  const path = await window.aiPlayer?.dialog?.openFile()
+                  if (path) onPlay(path.split(/[\\/]/).pop() || path, path)
+                }}
+                className="px-4 py-2 rounded-lg bg-player-accent text-sm"
+              >打开文件</button>
+              <button
+                onClick={async () => {
+                  const path = await window.aiPlayer?.dialog?.openFolder()
+                  if (path) window.dispatchEvent(new CustomEvent('ai-player-open-folder', { detail: path }))
+                }}
+                className="px-4 py-2 rounded-lg bg-player-surface text-sm hover:bg-white/10"
+              >打开文件夹</button>
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {filtered.map((f) => (
@@ -329,6 +443,12 @@ export default function MediaLibrary({ onPlay }: Props) {
                 onClick={() => onPlay(f.name, f.path)}
                 className="relative aspect-[2/3] bg-player-surface rounded-lg flex flex-col items-end justify-between p-3 hover:ring-2 ring-player-accent transition-all cursor-pointer"
               >
+                {posters[f.path]?.poster && (
+                  <>
+                    <img src={posters[f.path].poster || ''} alt="" className="absolute inset-0 w-full h-full object-cover rounded-lg" />
+                    <div className="absolute inset-0 rounded-lg bg-gradient-to-t from-black via-black/10 to-black/40" />
+                  </>
+                )}
                 {isPrintable(f.ext) && (
                   <button
                     onClick={(e) => handlePrint(e, f.path, f.ext)}
@@ -348,13 +468,21 @@ export default function MediaLibrary({ onPlay }: Props) {
                     📺
                   </button>
                 )}
-                <span className="text-xs text-gray-500 self-start">
+                <button
+                  title={favorites.includes(f.path) ? '取消收藏' : '收藏'}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    toggleFavorite(f.path)
+                  }}
+                  className="absolute bottom-2 left-2 w-7 h-7 flex items-center justify-center rounded bg-black/50 hover:bg-black/70 text-sm"
+                >{favorites.includes(f.path) ? '★' : '☆'}</button>
+                <span className="relative text-xs text-gray-300 self-start">
                   {f.ext.slice(1).toUpperCase()}
                 </span>
-                <span className="text-sm text-left break-all line-clamp-3">
-                  {f.name}
+                <span className="relative text-sm text-left break-all line-clamp-3">
+                  {posters[f.path]?.title || f.name}
                 </span>
-                <span className="text-xs text-gray-600">{fmtSize(f.size)}</span>
+                <span className="relative text-xs text-gray-300">{posters[f.path]?.year || fmtSize(f.size)}</span>
               </div>
             ))}
           </div>
