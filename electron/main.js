@@ -77,6 +77,7 @@ const activeComputerUseRequests = new Map()
 const activeDocumentRequests = new Map()
 const approvedDocumentSelections = new Map()
 const authorizedFolders = new Set()
+const userAuthorizedPaths = new Set()
 
 ipcMain.on('app:version', (event) => {
   event.returnValue = app.getVersion()
@@ -123,6 +124,7 @@ function approveDocumentPaths(filePaths) {
   return files.map((file) => {
     const token = crypto.randomUUID()
     approvedDocumentSelections.set(token, { path: file.path, createdAt: Date.now() })
+    userAuthorizedPaths.add(file.path)
     return { token, name: file.name, ext: file.ext, size: file.size }
   })
 }
@@ -307,9 +309,19 @@ const openFileOptions = {
   properties: ['openFile']
 }
 
+function assertPrintablePath(filePath) {
+  if (typeof filePath !== 'string' || !filePath.trim()) throw new Error('打印路径无效')
+  const resolved = path.resolve(filePath)
+  if (userAuthorizedPaths.has(resolved)) return resolved
+  if (isPathInsideRoots(resolved, [...authorizedFolders], { realpathSync: (value) => fs.realpathSync(value) })) return resolved
+  throw new Error('只允许打印经你明确选择过的文件或媒体库内的文件')
+}
+
 async function chooseFile() {
   const result = await dialog.showOpenDialog(mainWindow, openFileOptions)
-  return result.canceled ? null : result.filePaths[0]
+  if (result.canceled) return null
+  userAuthorizedPaths.add(path.resolve(result.filePaths[0]))
+  return result.filePaths[0]
 }
 
 async function renderHtmlToPdf(html, finalPath) {
@@ -784,15 +796,18 @@ app.whenReady().then(async () => {
       ]
     })
     if (result.canceled) return { media: [], documents: [] }
-    return splitOpenAnyPaths(result.filePaths, {
+    const split = splitOpenAnyPaths(result.filePaths, {
       inspectDocuments: (paths) => documentWorkspace.inspect(paths),
       isMediaPath: (filePath, ext) => ALL_EXTS.includes(ext),
       approveDocument: (file) => {
         const token = crypto.randomUUID()
         approvedDocumentSelections.set(token, { path: file.path, createdAt: Date.now() })
+        userAuthorizedPaths.add(file.path)
         return { token, name: file.name, ext: file.ext, size: file.size }
       }
     })
+    for (const mediaPath of split.media) userAuthorizedPaths.add(mediaPath)
+    return split
   })
   ipcMain.handle('chat:attach-paths', (event, filePaths) => {
     assertTrustedSender(event)
@@ -1071,10 +1086,25 @@ app.whenReady().then(async () => {
       return { success: false, error: String(e) }
     }
   })
-  ipcMain.handle('print:file', (_e, p) => printFile(p))
-  ipcMain.handle('print:text', async (_e, filePath) => {
+  ipcMain.handle('print:file', async (event, p) => {
+    assertTrustedSender(event)
     try {
-      const content = require('fs').readFileSync(filePath, 'utf-8').slice(0, 50000)
+      const resolved = assertPrintablePath(p)
+      const ext = path.extname(resolved).toLowerCase()
+      if (['.doc', '.docx', '.rtf', '.odt', '.xls', '.xlsx', '.csv', '.ods', '.ppt', '.pptx', '.odp'].includes(ext)) {
+        const printed = await officeConvert.printFile(resolved)
+        return { success: true, action: `已用本机 ${printed.engine} 发送打印` }
+      }
+      return printFile(resolved)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('print:text', async (event, filePath) => {
+    assertTrustedSender(event)
+    try {
+      const resolved = assertPrintablePath(filePath)
+      const content = require('fs').readFileSync(resolved, 'utf-8').slice(0, 50000)
       const escaped = content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       const win = new BrowserWindow({ show: false })
       await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<pre style="font-family:monospace;white-space:pre-wrap;padding:20px">' + escaped + '</pre>'))

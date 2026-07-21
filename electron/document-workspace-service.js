@@ -49,12 +49,18 @@ function classifyTask(files, instruction, preferredOutput = 'auto') {
   if (files.length >= 2 && exts.every((ext) => ext === '.pdf') && /合并|拼接|combine|merge/i.test(text)) {
     return { kind: 'pdf-merge', outputFormat: 'pdf', requiresAi: false, summary: `合并 ${files.length} 个 PDF` }
   }
+  if (files.length === 1 && exts[0] === '.pdf') {
+    const removeMatch = /^删除第\s*([0-9]+(?:\s*[-~到至,，、]\s*[0-9]+)*)\s*页/.exec(text)
+    if (removeMatch) return { kind: 'pdf-remove-pages', outputFormat: 'pdf', requiresAi: false, summary: '删除 PDF 指定页', pageList: parsePageList(removeMatch[1]) }
+    const extractMatch = /^(?:只要|提取)第\s*([0-9]+)\s*(?:[-~到至]\s*([0-9]+))?\s*页/.exec(text)
+    if (extractMatch) return { kind: 'pdf-extract-pages', outputFormat: 'pdf', requiresAi: false, summary: '提取 PDF 页码范围', from: Number(extractMatch[1]), to: Number(extractMatch[2] || extractMatch[1]) }
+  }
   if (files.length === 1 && exts[0] === '.pdf' && /拆分|分页|每页|split/i.test(text)) {
     return { kind: 'pdf-split', outputFormat: 'pdf', requiresAi: false, summary: '按页拆分 PDF' }
   }
-  if (files.length === 1 && ['.xlsx', '.csv'].includes(exts[0]) && /去重|清理|空格|公式|trim/i.test(text)) {
+  if (files.length === 1 && ['.xlsx', '.csv'].includes(exts[0]) && (/去重|清理|空格|公式|trim/i.test(text) || parseCellSet(text))) {
     const hasExplicitFormula = /=\s*[A-Z]+\d+|公式\s*[：:]\s*=/.test(text)
-    const requiresAi = /公式/.test(text) && !hasExplicitFormula
+    const requiresAi = /公式/.test(text) && !hasExplicitFormula && !parseCellSet(text)
     return { kind: 'spreadsheet-edit', outputFormat: 'xlsx', requiresAi, summary: requiresAi ? '理解并写入表格公式' : '清理或修改表格' }
   }
   if (files.length === 1 && exts[0] === '.docx') {
@@ -550,6 +556,21 @@ function parseExplicitFormula(instruction) {
   return { column: target[1].toUpperCase(), formula: formula[1].replace(/^=\s*/, '=') }
 }
 
+function parseCellSet(instruction) {
+  const match = /^把\s*\$?([A-Za-z]{1,3})\s*\$?(\d+)\s*(?:改成|改为|设置为|填入|写上)\s*([^，。；;]+)$/.exec(String(instruction || '').trim())
+  if (!match) return null
+  return { column: match[1].toUpperCase(), row: Number(match[2]), value: match[3].trim() }
+}
+
+function coerceCellValue(value) {
+  const text = String(value).trim()
+  if (text === '') return null
+  const numeric = Number(text)
+  if (!Number.isNaN(numeric) && /^-?\d+(\.\d+)?$/.test(text)) return numeric
+  if (/^(true|false)$/i.test(text)) return /^true$/i.test(text)
+  return text
+}
+
 function formulaForRow(formula, rowNumber) {
   if (formula.includes('{row}')) return formula.replace(/\{row\}/gi, String(rowNumber))
   return formula.replace(/(\$?[A-Z]{1,3}\$?)2\b/g, `$1${rowNumber}`)
@@ -632,6 +653,12 @@ async function editSpreadsheet(sourcePath, finalPath, instruction, formulaPlan =
   else await workbook.xlsx.readFile(sourcePath)
   const operations = []
   for (const sheet of workbook.worksheets) {
+    const cellSpec = parseCellSet(instruction)
+    if (cellSpec) {
+      if (cellSpec.row < 1 || cellSpec.row > sheet.rowCount + 1) throw new Error(`行号超出范围：第 ${cellSpec.row} 行（工作表共 ${sheet.rowCount} 行）`)
+      sheet.getCell(`${cellSpec.column}${cellSpec.row}`).value = coerceCellValue(cellSpec.value)
+      operations.push(`${sheet.name}：${cellSpec.column}${cellSpec.row} 改为 ${cellSpec.value}`)
+    }
     if (/清理|空格|trim/i.test(instruction)) {
       sheet.eachRow((row) => row.eachCell((cell) => {
         if (typeof cell.value === 'string') cell.value = cell.value.trim()
@@ -685,6 +712,45 @@ async function mergePdfs(files, finalPath) {
   }
   commitBuffer(finalPath, await output.save())
   return pageCount
+}
+
+function parsePageList(text) {
+  const pages = new Set()
+  for (const part of String(text).split(/[,，、]/)) {
+    const range = /^\s*(\d+)\s*[-~到至]\s*(\d+)\s*$/.exec(part)
+    if (range) {
+      const from = Number(range[1])
+      const to = Number(range[2])
+      for (let page = Math.min(from, to); page <= Math.max(from, to); page += 1) pages.add(page)
+    } else if (/^\s*\d+\s*$/.test(part)) {
+      pages.add(Number(part.trim()))
+    }
+  }
+  return [...pages].sort((a, b) => a - b)
+}
+
+async function removePdfPages(filePath, finalPath, pageList) {
+  const document = await PDFDocument.load(fs.readFileSync(filePath), { ignoreEncryption: false })
+  const total = document.getPageCount()
+  if (!Array.isArray(pageList) || pageList.length === 0) throw new Error('没有给出要删除的页码')
+  for (const page of pageList) {
+    if (page < 1 || page > total) throw new Error(`没有第 ${page} 页（共 ${total} 页）`)
+  }
+  if (pageList.length >= total) throw new Error('不能删除全部页面')
+  for (const page of [...pageList].sort((a, b) => b - a)) document.removePage(page - 1)
+  commitBuffer(finalPath, await document.save())
+  return total - pageList.length
+}
+
+async function extractPdfPages(filePath, finalPath, from, to) {
+  const source = await PDFDocument.load(fs.readFileSync(filePath), { ignoreEncryption: false })
+  const total = source.getPageCount()
+  if (from < 1 || to < from || to > total) throw new Error(`页码范围无效（共 ${total} 页）`)
+  const output = await PDFDocument.create()
+  const pages = await output.copyPages(source, Array.from({ length: to - from + 1 }, (_, index) => from - 1 + index))
+  pages.forEach((page) => output.addPage(page))
+  commitBuffer(finalPath, await output.save())
+  return pages.length
 }
 
 async function splitPdf(filePath, outputDir, baseName) {
@@ -863,6 +929,14 @@ class DocumentWorkspaceService {
     } else if (plan.kind === 'pdf-split') {
       const outputs = await splitPdf(plan.files[0].path, outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay拆分`)
       result = { outputs, summary: `已拆分为 ${outputs.length} 个单页 PDF` }
+    } else if (plan.kind === 'pdf-remove-pages') {
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pdf')
+      const remaining = await removePdfPages(plan.files[0].path, finalPath, plan.pageList)
+      result = { outputs: [finalPath], summary: `已删除 ${plan.pageList.length} 页，剩余 ${remaining} 页` }
+    } else if (plan.kind === 'pdf-extract-pages') {
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pdf')
+      const count = await extractPdfPages(plan.files[0].path, finalPath, plan.from, plan.to)
+      result = { outputs: [finalPath], summary: `已提取第 ${plan.from}-${plan.to} 页（共 ${count} 页）` }
     } else if (plan.kind === 'spreadsheet-edit') {
       const formulaPlan = plan.requiresAi ? await this.buildFormulaPlan(plan, options) : null
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'xlsx')

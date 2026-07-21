@@ -1,8 +1,9 @@
-﻿param(
+param(
   [string]$Source,
   [string]$Target,
   [ValidateSet('Word', 'Excel', 'PowerPoint')][string]$App = 'Word',
-  [switch]$ProbeEngines
+  [switch]$ProbeEngines,
+  [switch]$Print
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -24,7 +25,7 @@ if ($ProbeEngines) {
   exit 0
 }
 
-if (-not $Source -or -not $Target) { throw '缺少 Source 或 Target 参数' }
+if (-not $Source -or (-not $Print -and -not $Target)) { throw '缺少 Source 或 Target 参数' }
 $office = $null
 try {
   switch ($App) {
@@ -35,8 +36,11 @@ try {
       try { $office.AutomationSecurity = 3 } catch { }
       $doc = $office.Documents.Open($Source, $false, $true)
       try {
-        try { $doc.ExportAsFixedFormat($Target, 0) }
-        catch { $doc.SaveAs([ref]$Target, [ref]17) }
+        if ($Print) { $doc.PrintOut() }
+        else {
+          try { $doc.ExportAsFixedFormat($Target, 0) }
+          catch { $doc.SaveAs([ref]$Target, [ref]17) }
+        }
       } finally { $doc.Close($false) }
     }
     'Excel' {
@@ -45,7 +49,10 @@ try {
       $office.DisplayAlerts = $false
       try { $office.AutomationSecurity = 3 } catch { }
       $wb = $office.Workbooks.Open($Source, 0, $true)
-      try { $wb.ExportAsFixedFormat(0, $Target) }
+      try {
+        if ($Print) { $wb.PrintOut() }
+        else { $wb.ExportAsFixedFormat(0, $Target) }
+      }
       finally { $wb.Close($false) }
     }
     'PowerPoint' {
@@ -53,12 +60,16 @@ try {
       try { $office.AutomationSecurity = 3 } catch { }
       $pres = $office.Presentations.Open($Source, $true, $true, $false)
       try {
-        try { $pres.ExportAsFixedFormat($Target, 2) }
-        catch { $pres.SaveAs($Target, 32) }
+        if ($Print) { $pres.PrintOut() }
+        else {
+          try { $pres.ExportAsFixedFormat($Target, 2) }
+          catch { $pres.SaveAs($Target, 32) }
+        }
       } finally { $pres.Close() }
     }
   }
-  Write-Output "CONVERT-OK $Target"
+  if ($Print) { Write-Output "PRINT-OK $Source" }
+  else { Write-Output "CONVERT-OK $Target" }
 } finally {
   if ($office) { try { $office.Quit() } catch { } }
 }

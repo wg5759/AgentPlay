@@ -158,6 +158,20 @@ test('library context menu routes documents to the unified chat with authorized 
   assert.match(library, /chat\?\.attachPaths\(\[menu\.file\.path\]\)/)
   assert.match(library, /ai-player-attach-docs/)
   assert.match(panel, /ai-player-attach-docs/)
+  assert.match(library, /打印/)
+  assert.match(library, /isPrintable\(menu\.file\.ext\)/)
+})
+
+test('printing routes office formats to the local engine and validates authorized paths', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8')
+  const script = fs.readFileSync(path.join(__dirname, '..', 'electron', 'office-convert.ps1'), 'utf8')
+  const service = fs.readFileSync(path.join(__dirname, '..', 'electron', 'office-convert-service.js'), 'utf8')
+  assert.match(main, /assertPrintablePath/)
+  assert.match(main, /officeConvert\.printFile\(resolved\)/)
+  assert.match(main, /只允许打印经你明确选择过的文件或媒体库内的文件/)
+  assert.match(script, /if \(\$Print\)/)
+  assert.match(script, /PrintOut/)
+  assert.match(service, /async printFile\(sourcePath\)/)
 })
 
 test('AgentPlay branding preserves the 0.6.x internal app identity and existing user data', () => {

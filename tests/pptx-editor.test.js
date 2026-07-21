@@ -163,3 +163,36 @@ test('service.run executes a mixed pptx edit task fully local and records histor
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('parsePptxEditInstruction reads page move', () => {
+  assert.deepEqual(parsePptxEditInstruction('把第3页移到第1页前'), [{ type: 'move', page: 3, beforePage: 1, position: 'before' }])
+  assert.deepEqual(parsePptxEditInstruction('把第1页移到第3页后'), [{ type: 'move', page: 1, beforePage: 3, position: 'after' }])
+})
+
+test('moving pages reorders the deck while parts stay intact', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pptx-move-'))
+  try {
+    const fixture = path.join(tempDir, '汇报.pptx')
+    const output = path.join(tempDir, '汇报-out.pptx')
+    await buildFixture(fixture)
+    const originalBytes = fs.readFileSync(fixture)
+    await editPptx(fixture, output, [{ type: 'move', page: 3, beforePage: 1, position: 'before' }])
+    let { texts } = await slideTexts(output)
+    assert.ok(texts[0].includes('感谢观看'))
+    assert.ok(texts[1].includes('年度汇报'))
+    assert.ok(texts[2].includes('第二季度数据'))
+
+    const output2 = path.join(tempDir, '汇报-out2.pptx')
+    await editPptx(fixture, output2, [{ type: 'move', page: 1, beforePage: 3, position: 'after' }])
+    ;({ texts } = await slideTexts(output2))
+    assert.ok(texts[0].includes('第二季度数据'))
+    assert.ok(texts[1].includes('感谢观看'))
+    assert.ok(texts[2].includes('年度汇报'))
+    assert.deepEqual(fs.readFileSync(fixture), originalBytes)
+
+    await assert.rejects(() => editPptx(fixture, path.join(tempDir, 'x.pptx'), [{ type: 'move', page: 9, beforePage: 1, position: 'before' }]), /超出范围/)
+    await assert.rejects(() => editPptx(fixture, path.join(tempDir, 'y.pptx'), [{ type: 'move', page: 1, beforePage: 1, position: 'before' }]), /相同/)
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+})

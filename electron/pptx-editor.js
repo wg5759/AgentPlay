@@ -59,6 +59,11 @@ function parsePptxEditInstruction(instruction) {
       operations.push({ type: 'replace', from, to, page: replace[1] ? Number(replace[1]) : null })
       continue
     }
+    const move = /^把?第?(\d+)\s*页移到第?(\d+)\s*页(前|后)$/.exec(segment)
+    if (move) {
+      operations.push({ type: 'move', page: Number(move[1]), beforePage: Number(move[2]), position: move[3] === '前' ? 'before' : 'after' })
+      continue
+    }
     const remove = /^(?:删除|删掉|去掉)\s*第?(\d+)\s*页$/.exec(segment) || /^第?(\d+)\s*页(?:删除|删掉)$/.exec(segment)
     if (remove) {
       operations.push({ type: 'remove', page: Number(remove[1]) })
@@ -230,6 +235,22 @@ async function applyAdd(archive, presentationXml, relsXml, operation, order) {
   return { presentationXml: newPresentationXml, relsXml: newRelsXml }
 }
 
+function applyMove(presentationXml, { page, beforePage, position }, order) {
+  if (page < 1 || page > order.length || beforePage < 1 || beforePage > order.length) {
+    throw new Error(`页码超出范围（共 ${order.length} 页）；未改动原文件`)
+  }
+  if (page === beforePage) throw new Error('源页与目标页相同；未改动原文件')
+  const tags = [...presentationXml.matchAll(/<p:sldId\b[^>]*\/>/g)].map((match) => match[0])
+  if (tags.length !== order.length) throw new Error('演示结构异常；未改动原文件')
+  const [moved] = tags.splice(page - 1, 1)
+  const targetIndex = beforePage - 1 > page - 1 ? beforePage - 2 : beforePage - 1
+  const insertAt = position === 'before' ? targetIndex : targetIndex + 1
+  tags.splice(insertAt, 0, moved)
+  const listMatch = /<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/.exec(presentationXml)
+  if (!listMatch) throw new Error('演示结构异常（缺少 sldIdLst）；未改动原文件')
+  return presentationXml.replace(listMatch[0], `<p:sldIdLst>${tags.join('')}</p:sldIdLst>`)
+}
+
 async function editPptx(sourcePath, finalPath, operations) {
   const archive = await JSZip.loadAsync(fs.readFileSync(sourcePath))
   const presentationFile = archive.file('ppt/presentation.xml')
@@ -289,6 +310,10 @@ async function editPptx(sourcePath, finalPath, operations) {
       relsXml = result.relsXml
       order = slideOrder(presentationXml, relsXml)
       summaries.push(`新增页「${operation.title}」`)
+    } else if (operation.type === 'move') {
+      presentationXml = applyMove(presentationXml, operation, order)
+      order = slideOrder(presentationXml, relsXml)
+      summaries.push(`第 ${operation.page} 页移到第 ${operation.beforePage} 页${operation.position === 'before' ? '前' : '后'}`)
     }
   }
 

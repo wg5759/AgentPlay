@@ -78,6 +78,20 @@ class OfficeConvertService {
     }
   }
 
+  async printFile(sourcePath) {
+    const app = APP_BY_EXT[path.extname(sourcePath).toLowerCase()]
+    if (!app) throw new Error(`该格式不支持高保真打印：${path.extname(sourcePath) || '未知'}`)
+    const status = await this.detect()
+    if (!status.available) {
+      throw new Error('打印 Office 文档需要本机安装 Office 或 WPS；当前未检测到（PDF 与图片可直接打印）')
+    }
+    if (!status.engines.some((engine) => engine.app === app)) {
+      throw new Error(`打印该格式需要本机安装 Microsoft ${app}（或 WPS 对应组件）；当前未检测到`)
+    }
+    await this.runPsGuarded(['-Source', sourcePath, '-App', app, '-Print'], OFFICE_PROCESS[app])
+    return { engine: app }
+  }
+
   runPs(args) {
     return new Promise((resolve, reject) => {
       const child = this.spawnImpl(this.powershellPath, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', this.scriptPath, ...args], { windowsHide: true })

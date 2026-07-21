@@ -91,6 +91,16 @@ function parseEditInstruction(instruction) {
       operations.push({ type: 'insert', anchor: insertByAnchor[1].trim(), position: insertByAnchor[2] === '前' ? 'before' : 'after', lines })
       continue
     }
+    const removeByIndex = /^删除第(\d+)(?:个)?(?:自然)?段$/.exec(body)
+    if (removeByIndex) {
+      operations.push({ type: 'remove', anchor: Number(removeByIndex[1]) })
+      continue
+    }
+    const removeByText = /^删除包含(.+?)的段落$/.exec(body)
+    if (removeByText) {
+      operations.push({ type: 'remove', anchor: removeByText[1].trim() })
+      continue
+    }
     const appendTail = /(?:在|到)?(?:文档|文章)?(?:末尾|文末|最后|结尾)(?:处)?(?:加上|添加|追加|补上)[：:]?\s*(.+)$/.exec(body)
     const appendHead = /(?:加上|添加|追加|补上)[：:]?\s*(.+?)\s*(?:到|在)(?:文档|文章)?(?:末尾|文末|最后|结尾)(?:处)?$/.exec(body)
     const append = appendTail || appendHead
@@ -263,6 +273,23 @@ async function applyComments(archive, documentXml, comments) {
   return { xml: documentXml, count }
 }
 
+function removeParagraphs(documentXml, operations) {
+  const anchors = operations.map((operation) => (typeof operation.anchor === 'number' ? operation.anchor : candidateForms(operation.anchor)))
+  let counter = 0
+  let removed = 0
+  const xml = documentXml.replace(PARAGRAPH_RE, (paragraphXml) => {
+    counter += 1
+    const hit = anchors.some((anchor) => (typeof anchor === 'number'
+      ? counter === anchor
+      : anchor.some((candidate) => visibleText(paragraphXml).includes(candidate))))
+    if (!hit) return paragraphXml
+    removed += 1
+    return ''
+  })
+  if (removed === 0) throw new Error('没有找到要删除的段落；未改动原文件')
+  return { xml, removed }
+}
+
 async function editDocx(sourcePath, finalPath, operations) {
   const archive = await JSZip.loadAsync(fs.readFileSync(sourcePath))
   const documentFile = archive.file('word/document.xml')
@@ -284,6 +311,12 @@ async function editDocx(sourcePath, finalPath, operations) {
       documentXml = insertAtParagraph(documentXml, operation)
       summaries.push(`${operation.position === 'before' ? '前' : '后'}插入 ${operation.lines.length} 段`)
     }
+  }
+  const removals = operations.filter((operation) => operation.type === 'remove')
+  if (removals.length > 0) {
+    const result = removeParagraphs(documentXml, removals)
+    documentXml = result.xml
+    summaries.push(`删除 ${result.removed} 个段落`)
   }
   const comments = operations.filter((operation) => operation.type === 'comment')
   if (comments.length > 0) {

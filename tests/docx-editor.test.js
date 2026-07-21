@@ -250,3 +250,40 @@ test('service.run handles a mixed track-replace, comment and insert task fully l
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('parseEditInstruction reads paragraph removal by index and by text', () => {
+  assert.deepEqual(parseEditInstruction('删除第2段'), [{ type: 'remove', anchor: 2 }])
+  assert.deepEqual(parseEditInstruction('删除包含"机密"的段落'), [{ type: 'remove', anchor: '机密' }])
+  const mixed = parseEditInstruction('删除第1段\n把张三替换成李四')
+  assert.equal(mixed.length, 2)
+  assert.equal(mixed[0].type, 'remove')
+  assert.equal(mixed[1].type, 'replace')
+})
+
+test('remove paragraphs by index and by text, leaving everything else intact', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docx-remove-'))
+  try {
+    const fixture = path.join(tempDir, '合同.docx')
+    const output = path.join(tempDir, '合同-out.docx')
+    await buildComplexFixture(fixture)
+    const originalBytes = fs.readFileSync(fixture)
+    const summary = await editDocx(fixture, output, [{ type: 'remove', anchor: 2 }])
+    assert.match(summary, /删除 1 个段落/)
+    let archive = await JSZip.loadAsync(fs.readFileSync(output))
+    let xml = await archive.file('word/document.xml').async('string')
+    assert.ok(!xml.includes('张'))
+    assert.ok(xml.includes('合作框架协议'))
+    assert.ok(xml.includes('<w:tbl>'))
+
+    const output2 = path.join(tempDir, '合同-out2.docx')
+    await editDocx(fixture, output2, [{ type: 'remove', anchor: '其他约定' }])
+    archive = await JSZip.loadAsync(fs.readFileSync(output2))
+    xml = await archive.file('word/document.xml').async('string')
+    assert.ok(!xml.includes('其他约定事项保持不变'))
+    assert.deepEqual(fs.readFileSync(fixture), originalBytes)
+
+    await assert.rejects(() => editDocx(fixture, path.join(tempDir, 'x.docx'), [{ type: 'remove', anchor: '根本不存在的词xyz' }]), /没有找到要删除的段落/)
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+})

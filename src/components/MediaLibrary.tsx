@@ -212,7 +212,7 @@ export default function MediaLibrary({ onPlay, rootDir }: Props) {
     (f) => (query ? f.name.toLowerCase().includes(query.toLowerCase()) : true)
   )
 
-  const PRINTABLE = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.pdf', '.srt', '.ass', '.vtt', '.txt', '.md']
+  const PRINTABLE = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.pdf', '.srt', '.ass', '.vtt', '.txt', '.md', '.doc', '.docx', '.rtf', '.odt', '.xls', '.xlsx', '.csv', '.ods', '.ppt', '.pptx', '.odp', '.html', '.htm']
   const isPrintable = (ext: string) => PRINTABLE.includes(ext)
   const handlePrint = (e: React.MouseEvent, path: string, ext: string) => {
     e.stopPropagation()
@@ -507,6 +507,9 @@ export default function MediaLibrary({ onPlay, rootDir }: Props) {
               void window.aiPlayer?.system?.openPath(cut > 0 ? menu.file.path.slice(0, cut) : menu.file.path)
               setMenu(null)
             }}>打开所在文件夹</button>
+            {isPrintable(menu.file.ext) && (
+              <button className="block w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-white/10" onClick={(event) => { handlePrint(event as unknown as React.MouseEvent, menu.file.path, menu.file.ext); setMenu(null) }}>打印</button>
+            )}
             {['.txt', '.md', '.csv', '.json', '.srt', '.vtt', '.doc', '.docx', '.xlsx', '.pptx', '.pdf', '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'].includes(menu.file.ext) && (
               <button className="block w-full px-4 py-2 text-left text-sm text-blue-300 hover:bg-white/10" onClick={async () => {
                 const result = await window.aiPlayer?.chat?.attachPaths([menu.file.path])

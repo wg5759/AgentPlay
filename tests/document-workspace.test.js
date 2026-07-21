@@ -232,3 +232,70 @@ test('rtf to pdf conversion runs fully local end to end', async () => {
     fs.rmSync(tempDir, { recursive: true, force: true })
   }
 })
+
+test('PDF 删页与提取页：分类、执行与边界', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf-pages-'))
+  try {
+    const doc = await PDFDocument.create()
+    doc.addPage([612, 792])
+    doc.addPage([612, 792])
+    doc.addPage([612, 792])
+    const pdfPath = path.join(tempDir, '三页.pdf')
+    fs.writeFileSync(pdfPath, await doc.save())
+    const service = workspace(tempDir)
+
+    const removePlan = classifyTask([{ path: '三页.pdf' }], '删除第2页', 'auto')
+    assert.deepEqual(removePlan, { kind: 'pdf-remove-pages', outputFormat: 'pdf', requiresAi: false, summary: '删除 PDF 指定页', pageList: [2] })
+    const removed = await service.run([pdfPath], '删除第2页', 'auto')
+    assert.equal(removed.success, true)
+    let loaded = await PDFDocument.load(fs.readFileSync(removed.outputs[0]))
+    assert.equal(loaded.getPageCount(), 2)
+
+    const extractPlan = classifyTask([{ path: '三页.pdf' }], '只要第1到2页', 'auto')
+    assert.deepEqual(extractPlan, { kind: 'pdf-extract-pages', outputFormat: 'pdf', requiresAi: false, summary: '提取 PDF 页码范围', from: 1, to: 2 })
+    const extracted = await service.run([pdfPath], '只要第1到2页', 'auto')
+    loaded = await PDFDocument.load(fs.readFileSync(extracted.outputs[0]))
+    assert.equal(loaded.getPageCount(), 2)
+
+    assert.deepEqual(classifyTask([{ path: '三页.pdf' }], '删除第2-3页', 'auto').pageList, [2, 3])
+    await assert.rejects(() => service.run([pdfPath], '删除第1-3页', 'auto'), /不能删除全部页面/)
+    await assert.rejects(() => service.run([pdfPath], '只要第2到9页', 'auto'), /页码范围无效/)
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('单元格改写：分类、数值与文本写入、越界拦截', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cellset-'))
+  try {
+    const filePath = path.join(tempDir, '销售.xlsx')
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('数据')
+    sheet.addRow(['月份', '收入', '状态'])
+    sheet.addRow(['1月', 100, '待审'])
+    sheet.addRow(['2月', 200, '待审'])
+    await workbook.xlsx.writeFile(filePath)
+    const service = workspace(tempDir)
+
+    assert.equal(classifyTask([{ path: '销售.xlsx' }], '把B2改成150', 'auto').kind, 'spreadsheet-edit')
+    assert.equal(classifyTask([{ path: '销售.xlsx' }], '把表格改成pdf', 'auto').kind, 'convert')
+
+    const result = await service.run([filePath], '把B2改成150', 'auto')
+    assert.equal(result.success, true)
+    assert.match(result.summary, /B2 改为 150/)
+    const reopened = new ExcelJS.Workbook()
+    await reopened.xlsx.readFile(result.outputs[0])
+    const reopenedSheet = reopened.getWorksheet('数据')
+    assert.equal(reopenedSheet.getCell('B2').value, 150)
+    assert.equal(reopenedSheet.getCell('B3').value, 200)
+
+    const textResult = await service.run([result.outputs[0]], '把C2改为已审', 'auto')
+    const reopened2 = new ExcelJS.Workbook()
+    await reopened2.xlsx.readFile(textResult.outputs[0])
+    assert.equal(reopened2.getWorksheet('数据').getCell('C2').value, '已审')
+
+    await assert.rejects(() => service.run([filePath], '把B99改成1', 'auto'), /行号超出范围/)
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true })
+  }
+})
