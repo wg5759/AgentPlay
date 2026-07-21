@@ -8,6 +8,7 @@ const JSZip = require('jszip')
 const { Document, HeadingLevel, Packer, Paragraph, TextRun } = require('docx')
 const { PDFDocument } = require('pdf-lib')
 const { editDocx, parseEditInstruction } = require('./docx-editor')
+const { editPptx, parsePptxEditInstruction } = require('./pptx-editor')
 
 const SUPPORTED_EXTENSIONS = new Set([
   '.txt', '.md', '.csv', '.json', '.srt', '.vtt',
@@ -58,6 +59,10 @@ function classifyTask(files, instruction, preferredOutput = 'auto') {
   if (files.length === 1 && exts[0] === '.docx') {
     const editOperations = parseEditInstruction(text)
     if (editOperations) return { kind: 'docx-edit', outputFormat: 'docx', requiresAi: false, summary: '本地无损编辑 DOCX', editOperations }
+  }
+  if (files.length === 1 && exts[0] === '.pptx') {
+    const editOperations = parsePptxEditInstruction(text)
+    if (editOperations) return { kind: 'pptx-edit', outputFormat: 'pptx', requiresAi: false, summary: '本地页面级编辑 PPTX', editOperations }
   }
   const languageRetarget = /改成|变成/.test(text) && /英文|英语|中文|汉语|日语|日文|韩语|法语|德语|西班牙语|俄语/.test(text)
   const pureConversion = !languageRetarget && /转换|转成|转为|导出|改成|变成/.test(text) && !/改写|翻译|总结|提炼|补充|重组|生成|制作/.test(text)
@@ -681,6 +686,10 @@ class DocumentWorkspaceService {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'docx')
       const summary = await editDocx(plan.files[0].path, finalPath, plan.editOperations)
       result = { outputs: [finalPath], summary: `已无损完成：${summary}；样式与未涉及内容保持原样` }
+    } else if (plan.kind === 'pptx-edit') {
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pptx')
+      const summary = await editPptx(plan.files[0].path, finalPath, plan.editOperations)
+      result = { outputs: [finalPath], summary: `已完成：${summary}；母版、版式与未涉及内容保持原样` }
     } else if (plan.kind === 'convert' && ['.xlsx', '.csv'].includes(plan.files[0]?.ext) && plan.outputFormat === 'xlsx') {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'xlsx')
       await editSpreadsheet(plan.files[0].path, finalPath, '')
