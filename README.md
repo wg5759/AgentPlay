@@ -34,6 +34,14 @@ AgentPlay 是一个面向 AI 时代的本地媒体工作台：在可靠播放的
 
 模型、密钥和服务能力彼此独立。未配置模型时，正常播放、窗口比例、右键菜单和本地快捷控制仍应工作。
 
+## Code signing policy
+
+Free code signing provided by SignPath.io, certificate by SignPath Foundation（自首个签名版本起生效；此前版本继续以 SHA-256 校验）。
+
+- Committers and reviewers: [wg5759](https://github.com/wg5759)
+- Approvers: [wg5759](https://github.com/wg5759)
+- Privacy policy: [PRIVACY.md](PRIVACY.md)
+
 ## 安全与隐私默认值
 
 - 语音唤醒、Wi-Fi 传片、设备同步和 DLNA 服务默认关闭。
