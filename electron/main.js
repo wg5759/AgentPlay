@@ -42,6 +42,7 @@ const {
 const { DocumentWorkspaceService, SUPPORTED_EXTENSIONS, pdfPageCount } = require('./document-workspace-service')
 const { WinRtOcrService } = require('./ocr-service')
 const { OfficeConvertService } = require('./office-convert-service')
+const { splitOpenAnyPaths } = require('./open-any')
 const { rasterizePdfPages } = require('./pdf-rasterizer')
 const { LocalAiDownloadService } = require('./local-ai-download-service')
 const LOCAL_AI_PACK = require('./local-ai-pack-manifest')
@@ -770,6 +771,27 @@ app.whenReady().then(async () => {
     const controller = activeDocumentRequests.get(String(requestId || ''))
     controller?.abort()
     return Boolean(controller)
+  })
+  ipcMain.handle('chat:open-any', async (event) => {
+    assertTrustedSender(event)
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '打开文件（视频、音频、图片或文档）',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: '所有支持的文件', extensions: [...new Set([...ALL_EXTS, ...SUPPORTED_EXTENSIONS].map((ext) => ext.slice(1)))] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    if (result.canceled) return { media: [], documents: [] }
+    return splitOpenAnyPaths(result.filePaths, {
+      inspectDocuments: (paths) => documentWorkspace.inspect(paths),
+      isMediaPath: (filePath, ext) => ALL_EXTS.includes(ext),
+      approveDocument: (file) => {
+        const token = crypto.randomUUID()
+        approvedDocumentSelections.set(token, { path: file.path, createdAt: Date.now() })
+        return { token, name: file.name, ext: file.ext, size: file.size }
+      }
+    })
   })
   ipcMain.handle('models:providers', (event) => {
     assertTrustedSender(event)

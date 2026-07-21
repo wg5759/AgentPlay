@@ -135,10 +135,18 @@ function AppInner() {
       if (action === 'document-workspace') setDocumentWorkspaceOpen(true)
       if (action === 'voice-wake-toggle') toggleVoiceWake()
     }
+    const playFileHandler = (event: Event) => {
+      const filePath = (event as CustomEvent<string>).detail
+      if (!filePath) return
+      usePlayerStore.getState().setMedia(filePath.split(/[\\/]/).pop() || filePath, filePath)
+      setView('player')
+    }
     window.addEventListener('ai-player-open-folder', folderHandler)
+    window.addEventListener('ai-player-play-file', playFileHandler)
     window.addEventListener('ai-player-action', actionHandler)
     return () => {
       window.removeEventListener('ai-player-open-folder', folderHandler)
+      window.removeEventListener('ai-player-play-file', playFileHandler)
       window.removeEventListener('ai-player-action', actionHandler)
     }
   }, [])

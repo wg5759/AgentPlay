@@ -74,6 +74,9 @@ interface AiPlayerAPI {
     cancel: () => Promise<boolean>
     onProgress: (cb: (progress: LocalAiDownloadProgress) => void) => () => void
   }
+  chat?: {
+    openAny: () => Promise<{ media: string[]; documents: Array<{ token: string; name: string; ext: string; size: number }> }>
+  }
   player?: AiPlayerPlayerAPI
   sync?: {
     url: () => Promise<string | null>

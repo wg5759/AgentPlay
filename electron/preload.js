@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('aiPlayer', {
       return () => ipcRenderer.removeListener('ai:stream', handler)
     }
   },
+  chat: {
+    openAny: () => ipcRenderer.invoke('chat:open-any')
+  },
   documents: {
     capabilities: () => ipcRenderer.invoke('documents:capabilities'),
     selectFiles: () => ipcRenderer.invoke('documents:select-files'),

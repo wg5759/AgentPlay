@@ -117,6 +117,26 @@ test('single installer carries the in-app local AI download instead of a second 
   assert.ok(packManifest.assets.length >= 2)
 })
 
+test('unified conversation opens any file and runs document tasks inline', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8')
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.js'), 'utf8')
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'AgentPanel.tsx'), 'utf8')
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
+  const globalTypes = fs.readFileSync(path.join(__dirname, '..', 'src', 'types', 'global.d.ts'), 'utf8')
+  assert.match(main, /chat:open-any/)
+  assert.match(main, /splitOpenAnyPaths\(result\.filePaths/)
+  assert.match(main, /approvedDocumentSelections\.set\(token, \{ path: file\.path/)
+  assert.match(preload, /chat: \{\s*openAny: \(\) => ipcRenderer\.invoke\('chat:open-any'\)\s*\}/)
+  assert.match(panel, /chat\?\.openAny/)
+  assert.match(panel, /attachments\.length > 0/)
+  assert.match(panel, /api\.run\(\{ tokens, instruction, outputFormat: 'auto', cloudApproved/)
+  assert.match(panel, /允许把本次所选文件内容发送给当前云端模型/)
+  assert.match(panel, /ai-player-play-file/)
+  assert.match(panel, /system\?\.openPath\(output\)/)
+  assert.match(app, /ai-player-play-file/)
+  assert.match(globalTypes, /chat\?: \{[\s\S]{0,120}openAny/)
+})
+
 test('AgentPlay branding preserves the 0.6.x internal app identity and existing user data', () => {
   const packageConfig = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'))
   const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8')
