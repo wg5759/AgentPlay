@@ -65,6 +65,10 @@ function classifyTask(files, instruction, preferredOutput = 'auto') {
     const editOperations = parsePptxEditInstruction(text)
     if (editOperations) return { kind: 'pptx-edit', outputFormat: 'pptx', requiresAi: false, summary: '本地页面级编辑 PPTX', editOperations }
   }
+  const officeExts = ['.doc', '.docx', '.rtf', '.odt', '.xls', '.xlsx', '.csv', '.ods', '.ppt', '.pptx', '.odp']
+  if (files.length === 1 && officeExts.includes(exts[0]) && /高保真|原样|保真/.test(text) && /pdf/i.test(text)) {
+    return { kind: 'office-convert', outputFormat: 'pdf', requiresAi: false, summary: '调用本机 Office 引擎高保真转换' }
+  }
   const languageRetarget = /改成|变成/.test(text) && /英文|英语|中文|汉语|日语|日文|韩语|法语|德语|西班牙语|俄语/.test(text)
   const pureConversion = !languageRetarget && /转换|转成|转为|导出|改成|变成/.test(text) && !/改写|翻译|总结|提炼|补充|重组|生成|制作/.test(text)
   const readable = files.every((file) => ['.txt', '.md', '.csv', '.json', '.srt', '.vtt', '.docx', '.doc', '.xlsx', '.pptx', '.pdf', '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'].includes(path.extname(file.path).toLowerCase()))
@@ -653,12 +657,13 @@ async function splitPdf(filePath, outputDir, baseName) {
 }
 
 class DocumentWorkspaceService {
-  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr }) {
+  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr, officeConvert }) {
     this.outputRoot = outputRoot
     this.historyRoot = historyRoot
     this.complete = complete
     this.renderPdf = renderPdf
     this.ocr = ocr || null
+    this.officeConvert = officeConvert || null
   }
 
   inspect(filePaths) {
@@ -784,6 +789,11 @@ class DocumentWorkspaceService {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pptx')
       const summary = await editPptx(plan.files[0].path, finalPath, plan.editOperations)
       result = { outputs: [finalPath], summary: `已完成：${summary}；母版、版式与未涉及内容保持原样` }
+    } else if (plan.kind === 'office-convert') {
+      if (!this.officeConvert) throw new Error('当前平台没有高保真转换引擎（可改用普通转换）')
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pdf')
+      const converted = await this.officeConvert.convertToPdf(plan.files[0].path, finalPath)
+      result = { outputs: [finalPath], summary: `已用本机 ${converted.engine} 引擎高保真转换为 PDF（保留原版式）` }
     } else if (plan.kind === 'convert' && ['.xlsx', '.csv'].includes(plan.files[0]?.ext) && plan.outputFormat === 'xlsx') {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'xlsx')
       await editSpreadsheet(plan.files[0].path, finalPath, '')

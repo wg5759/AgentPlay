@@ -41,6 +41,7 @@ const {
 } = require('./creative-studio-service')
 const { DocumentWorkspaceService, SUPPORTED_EXTENSIONS, pdfPageCount } = require('./document-workspace-service')
 const { WinRtOcrService } = require('./ocr-service')
+const { OfficeConvertService } = require('./office-convert-service')
 const { rasterizePdfPages } = require('./pdf-rasterizer')
 const { LocalAiDownloadService } = require('./local-ai-download-service')
 const LOCAL_AI_PACK = require('./local-ai-pack-manifest')
@@ -340,6 +341,7 @@ function createHiddenWindow({ width, height }) {
 }
 
 const ocrService = new WinRtOcrService()
+const officeConvert = new OfficeConvertService()
 
 async function recognizePdfWithOcr(filePath) {
   const status = await ocrService.detect()
@@ -503,6 +505,7 @@ app.whenReady().then(async () => {
     historyRoot: path.join(app.getPath('userData'), 'document-workspace'),
     renderPdf: renderHtmlToPdf,
     ocr: { recognizePdf: recognizePdfWithOcr },
+    officeConvert,
     complete: async ({ systemPrompt, prompt, signal }) => {
       let config = modelConfigStore.resolved('chat')
       let usesBundledRuntime = false
