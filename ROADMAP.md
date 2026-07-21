@@ -52,4 +52,4 @@
 
 ## 发布
 
-上述变更通过源码检查后，还需要：版本号升级、Windows安装包（本地AI组件应用内下载落地后只出标准版一个包）、已安装EXE烟雾测试、安全扫描、公开Release资产校验，再发布到GitHub。免费签名与分发路径已确认：SignPath 开源免费 Authenticode 签名申请已于 2026-07-21 通过 signpath.org/apply 提交（README 与 v0.6.1 发布页已含 Code signing policy 表述），审批约1–4周；批准后依次执行：SignPath 后台建项目与 release-signing 策略、关联 GitHub 仓库与发布工作流、配置 SIGNPATH_API_TOKEN 等 secrets、CI 自动签名，首个签名版本随后向 winget-pkgs 提交清单实现 `winget install` 免费分发；在此之前继续提供SHA-256并保留SmartScreen提示说明。
+上述变更通过源码检查后，还需要：版本号升级、Windows安装包（本地AI组件应用内下载落地后只出标准版一个包）、已安装EXE烟雾测试、安全扫描、公开Release资产校验，再发布到GitHub。每次出验证包后的固定动作（用户已明确要求）：由维护者直接安装到本机、刷新 D 盘免装备份目录、并保证桌面“AI播放器”快捷方式指向当前安装（C:\Program Files\ai-player），用户只从桌面图标启动。免费签名与分发路径已确认：SignPath 开源免费 Authenticode 签名申请已于 2026-07-21 通过 signpath.org/apply 提交（README 与 v0.6.1 发布页已含 Code signing policy 表述），审批约1–4周；批准后依次执行：SignPath 后台建项目与 release-signing 策略、关联 GitHub 仓库与发布工作流、配置 SIGNPATH_API_TOKEN 等 secrets、CI 自动签名，首个签名版本随后向 winget-pkgs 提交清单实现 `winget install` 免费分发；在此之前继续提供SHA-256并保留SmartScreen提示说明。
