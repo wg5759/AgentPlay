@@ -1,6 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAgentStore } from '../stores/agentStore'
 
+const EXAMPLE_TASKS = [
+  { label: '整理成 Word', format: 'docx', text: '把所选资料整理成结构清晰的中文 Word 文档，保留事实和关键数据，增加标题和要点。' },
+  { label: '清理表格', format: 'xlsx', text: '清理所有文本首尾空格，并按手机号列去重，另存为新的 Excel 文件。' },
+  { label: '生成 PPT', format: 'pptx', text: '根据所选资料制作一套 12 页以内的中文演示稿，每页只保留关键结论，并添加演讲备注。' },
+  { label: '合并 PDF', format: 'pdf', text: '按照所选顺序合并这些 PDF，另存为一个新文件。' }
+]
+
+function kindLabel(kind: string) {
+  const labels: Record<string, string> = {
+    'pdf-merge': '本地合并 PDF',
+    'pdf-split': '本地拆分 PDF',
+    'spreadsheet-edit': '表格清理与公式处理',
+    convert: '本地格式转换',
+    'ai-generate': 'AI 内容生成与整理',
+    'docx-edit': '本地无损编辑 DOCX',
+    'pptx-edit': '本地页面级编辑 PPTX',
+    'office-convert': '本机 Office 高保真转换',
+    'ai-bundle': 'AI 成套生成'
+  }
+  return labels[kind] || kind
+}
+
 interface SpeechRecognitionResultEvent {
   results: ArrayLike<ArrayLike<{ transcript: string }>>
 }
@@ -26,6 +48,7 @@ export default function AgentPanel() {
   const [docOutputs, setDocOutputs] = useState<string[]>([])
   const [needsApproval, setNeedsApproval] = useState(false)
   const [cloudApproved, setCloudApproved] = useState(false)
+  const [outputFormat, setOutputFormat] = useState('auto')
   const attachmentsRef = useRef(attachments)
   attachmentsRef.current = attachments
   const docRequestIdRef = useRef('')
@@ -95,7 +118,8 @@ export default function AgentPanel() {
       const caps = docCaps || (await api.capabilities()) || null
       if (caps && !docCaps) setDocCaps(caps)
       const tokens = files.map((file) => file.token)
-      const preview = await api.plan({ tokens, instruction, outputFormat: 'auto' })
+      const preview = await api.plan({ tokens, instruction, outputFormat })
+      addMessage('agent', `方案：${kindLabel(preview.kind)} → ${preview.outputFormat.toUpperCase()}${preview.requiresAi ? '（需要模型）' : '（本地执行）'}`)
       if (preview.requiresAi && caps && !caps.modelConfigured) {
         throw new Error('这个任务需要模型理解或生成内容，请先在模型接入中心配置模型。')
       }
@@ -105,7 +129,7 @@ export default function AgentPanel() {
       }
       const requestId = `document-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       docRequestIdRef.current = requestId
-      const result = await api.run({ tokens, instruction, outputFormat: 'auto', cloudApproved: cloudApproved || forceApprove, requestId })
+      const result = await api.run({ tokens, instruction, outputFormat, cloudApproved: cloudApproved || forceApprove, requestId })
       if (!result.success) throw new Error(result.error || '文档处理失败')
       addMessage('agent', result.summary || '处理完成')
       setDocOutputs(result.outputs || [])
@@ -230,7 +254,7 @@ export default function AgentPanel() {
         )}
 
         {attachments.length > 0 && (
-          <div className="px-4 py-2 border-b border-white/10 flex flex-wrap gap-2">
+          <div className="px-4 py-2 border-b border-white/10 flex flex-wrap items-center gap-2">
             {attachments.map((file) => (
               <span key={file.token} className="flex items-center gap-2 rounded-lg border border-blue-400/20 bg-blue-500/10 px-2 py-1 text-xs text-blue-200">
                 <span className="font-semibold uppercase">{file.ext.slice(1)}</span>
@@ -238,6 +262,15 @@ export default function AgentPanel() {
                 <button onClick={() => setAttachments((current) => current.filter((item) => item.token !== file.token))} className="text-blue-300 hover:text-white">✕</button>
               </span>
             ))}
+            <select value={outputFormat} onChange={(event) => setOutputFormat(event.target.value)} className="ml-auto rounded border border-white/10 bg-[#111c2d] px-2 py-1 text-xs text-gray-300 outline-none">
+              <option value="auto">输出：自动判断</option>
+              <option value="docx">Word (.docx)</option>
+              <option value="xlsx">Excel (.xlsx)</option>
+              <option value="pptx">PPT (.pptx)</option>
+              <option value="pdf">PDF</option>
+              <option value="md">Markdown</option>
+              <option value="txt">纯文本</option>
+            </select>
           </div>
         )}
         {needsApproval && (
@@ -268,10 +301,24 @@ export default function AgentPanel() {
 
         {/* 消息列表 */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-          {messages.length === 0 && (
-            <p className="text-gray-500 text-sm text-center mt-8">
-              说点什么，或点 📎 打开视频和文档
-            </p>
+          {messages.length === 0 && attachments.length === 0 && (
+            <div className="mt-6">
+              <p className="text-gray-500 text-sm text-center">说点什么，或点 📎 打开视频和文档</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                {EXAMPLE_TASKS.map((task) => (
+                  <button
+                    key={task.label}
+                    onClick={() => { setInputText(task.text); setOutputFormat(task.format) }}
+                    className="rounded-lg border border-white/10 px-3 py-2 text-left text-xs text-gray-300 hover:border-player-accent hover:bg-white/5"
+                  >
+                    {task.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {messages.length === 0 && attachments.length > 0 && (
+            <p className="text-gray-500 text-sm text-center mt-8">附件已就绪，说对它们要做什么…</p>
           )}
           {(docBusy || docOutputs.length > 0) && (
             <div className="rounded-xl border border-emerald-400/20 bg-emerald-500/[0.07] p-3">

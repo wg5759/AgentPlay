@@ -439,7 +439,7 @@ const menuTemplate = [
   ] },
   { label: '功能', submenu: [
     { label: 'AI 助手', accelerator: 'CmdOrCtrl+K', click: () => sendAction('agent') },
-    { label: 'AI 文档工作台…', accelerator: 'CmdOrCtrl+D', click: () => sendAction('document-workspace') },
+    { label: 'AI 对话窗…', accelerator: 'CmdOrCtrl+D', click: () => sendAction('agent') },
     { label: '模型接入中心…', click: () => sendAction('model-center') },
     { label: '拉片、深度解剖与原创重构…', accelerator: 'CmdOrCtrl+L', click: () => sendAction('analysis-studio') },
     { type: 'separator' },

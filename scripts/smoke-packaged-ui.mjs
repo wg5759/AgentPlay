@@ -154,7 +154,7 @@ try {
   await delay(500)
   const body = await evaluate('document.body.innerText')
   const capabilities = await evaluate('window.aiPlayer.studio.capabilities()', true)
-  await evaluate("window.dispatchEvent(new CustomEvent('ai-player-action', { detail: 'document-workspace' })); true")
+  await evaluate("window.dispatchEvent(new CustomEvent('ai-player-action', { detail: 'agent' })); true")
   await delay(300)
   const documentWorkspace = await evaluate(`(async () => {
     const capabilities = await window.aiPlayer.documents.capabilities()
@@ -162,9 +162,9 @@ try {
       tokens: [], instruction: '生成一份 Word 文档', outputFormat: 'docx'
     })
     return {
-      visible: document.body.innerText.includes('AI 文档工作台'),
-      hasTextInput: Boolean(document.querySelector('textarea')),
-      hasVoiceInput: document.body.innerText.includes('语音输入'),
+      visible: document.body.innerText.includes('AI Agent'),
+      hasTextInput: Boolean(document.querySelector('input[placeholder*="麦克风"]')),
+      hasVoiceInput: document.body.innerText.includes('🎙'),
       formats: capabilities.formats,
       plan
     }

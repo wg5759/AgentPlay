@@ -122,21 +122,20 @@ test('AI plan can generate a reopenable PPTX', async (t) => {
   assert.match(await extractText(result.outputs[0]), /收入增长/)
 })
 
-test('desktop menu, preload bridge and React shell expose the document workspace end to end', () => {
+test('desktop menu, preload bridge and unified chat expose the document pipeline end to end', () => {
   const root = path.join(__dirname, '..')
   const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8')
   const preload = fs.readFileSync(path.join(root, 'electron', 'preload.js'), 'utf8')
   const app = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
-  const panel = fs.readFileSync(path.join(root, 'src', 'components', 'DocumentWorkspace.tsx'), 'utf8')
-  assert.match(main, /AI 文档工作台/)
+  const panel = fs.readFileSync(path.join(root, 'src', 'components', 'AgentPanel.tsx'), 'utf8')
+  assert.match(main, /AI 对话窗/)
   assert.match(main, /ipcMain\.handle\('documents:select-files'/)
   assert.match(main, /ipcMain\.handle\('documents:run'/)
   assert.match(preload, /documents:\s*\{/)
   assert.match(preload, /ipcRenderer\.invoke\('documents:run'/)
-  assert.match(app, /<DocumentWorkspace/)
-  assert.match(panel, /textarea/)
-  assert.match(panel, /语音输入/)
-  assert.match(panel, /原文件不会被覆盖/)
+  assert.doesNotMatch(app, /<DocumentWorkspace/)
+  assert.match(panel, /api\.run\(\{ tokens, instruction, outputFormat/)
+  assert.match(panel, /允许把本次所选文件内容发送给当前云端模型/)
 })
 
 test('PDF text extraction reads embedded text and rejects image-only PDFs honestly', async () => {

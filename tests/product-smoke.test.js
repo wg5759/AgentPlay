@@ -80,11 +80,11 @@ test('Windows installer registers the AgentPlay document verb for documents, sep
   assert.equal(installer.match(/DeleteRegKey HKCU "Software\\Classes\\SystemFileAssociations\\/g)?.length, documentExts.length)
 })
 
-test('Explorer AgentPlay document verb is routed to the document workspace, never the player', () => {
+test('Explorer AgentPlay document verb is routed to the unified chat, never the player', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8')
   const preload = fs.readFileSync(path.join(__dirname, '..', 'electron', 'preload.js'), 'utf8')
   const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
-  const workspace = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentWorkspace.tsx'), 'utf8')
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'AgentPanel.tsx'), 'utf8')
   const guard = main.match(/function queueExternalMediaArgs\(argv\) \{([\s\S]*?)\n\}/)
   assert.ok(guard, 'queueExternalMediaArgs body must be found')
   assert.ok(guard[1].includes('hasDocumentVerbFlag(argv)'), 'document verb guard must run inside queueExternalMediaArgs')
@@ -94,8 +94,9 @@ test('Explorer AgentPlay document verb is routed to the document workspace, neve
   assert.match(preload, /documents:open-external/)
   assert.match(preload, /onOpenExternal/)
   assert.match(app, /onOpenExternal/)
-  assert.match(app, /initialFiles=\{documentInitialFiles\}/)
-  assert.match(workspace, /initialFiles/)
+  assert.match(app, /ai-player-attach-docs/)
+  assert.match(panel, /ai-player-attach-docs/)
+  assert.match(panel, /outputFormat, cloudApproved/)
 })
 
 test('single installer carries the in-app local AI download instead of a second package', () => {
@@ -129,7 +130,7 @@ test('unified conversation opens any file and runs document tasks inline', () =>
   assert.match(preload, /openAny: \(\) => ipcRenderer\.invoke\('chat:open-any'\)/)
   assert.match(panel, /chat\?\.openAny/)
   assert.match(panel, /attachments\.length > 0/)
-  assert.match(panel, /api\.run\(\{ tokens, instruction, outputFormat: 'auto', cloudApproved/)
+  assert.match(panel, /api\.run\(\{ tokens, instruction, outputFormat, cloudApproved/)
   assert.match(panel, /允许把本次所选文件内容发送给当前云端模型/)
   assert.match(panel, /ai-player-play-file/)
   assert.match(panel, /system\?\.openPath\(output\)/)

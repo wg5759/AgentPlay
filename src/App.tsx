@@ -9,7 +9,6 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ModelCenter from './components/ModelCenter'
 import ComputerUsePanel from './components/ComputerUsePanel'
 import AnalysisStudio from './components/AnalysisStudio'
-import DocumentWorkspace from './components/DocumentWorkspace'
 
 function AppInner() {
   const [view, setView] = useState<'library' | 'player'>('library')
@@ -18,8 +17,6 @@ function AppInner() {
   const [computerUseOpen, setComputerUseOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [analysisStudioOpen, setAnalysisStudioOpen] = useState(false)
-  const [documentWorkspaceOpen, setDocumentWorkspaceOpen] = useState(false)
-  const [documentInitialFiles, setDocumentInitialFiles] = useState<Array<{ token: string; name: string; ext: string; size: number }>>([])
   const [voiceWakeEnabled, setVoiceWakeEnabled] = useState(() => localStorage.getItem('aiplayer_voice_wake_enabled') === 'true')
   const agentOpen = useAgentStore((s) => s.open)
 
@@ -71,8 +68,8 @@ function AppInner() {
       setComputerUseOpen(false)
       setModelCenterOpen(false)
       setAnalysisStudioOpen(false)
-      setDocumentInitialFiles(seedFiles)
-      setDocumentWorkspaceOpen(true)
+      useAgentStore.getState().openPanel()
+      window.dispatchEvent(new CustomEvent('ai-player-attach-docs', { detail: seedFiles }))
     })
     const offAction = menu.onAction((action) => {
       if (action === 'agent') useAgentStore.getState().openPanel()
@@ -90,7 +87,7 @@ function AppInner() {
         setComputerUseOpen(false)
         setModelCenterOpen(false)
         setAnalysisStudioOpen(false)
-        setDocumentWorkspaceOpen(true)
+        useAgentStore.getState().openPanel()
       }
       else if (action === 'voice-wake-toggle') toggleVoiceWake()
       else if (action === 'shortcuts') setShortcutsOpen(true)
@@ -132,7 +129,7 @@ function AppInner() {
       }
       if (action === 'computer-use') setComputerUseOpen(true)
       if (action === 'analysis-studio') setAnalysisStudioOpen(true)
-      if (action === 'document-workspace') setDocumentWorkspaceOpen(true)
+      if (action === 'document-workspace') useAgentStore.getState().openPanel()
       if (action === 'voice-wake-toggle') toggleVoiceWake()
     }
     const playFileHandler = (event: Event) => {
@@ -177,7 +174,6 @@ function AppInner() {
       {computerUseOpen && <ComputerUsePanel onClose={() => setComputerUseOpen(false)} />}
       {modelCenterOpen && <ModelCenter onClose={() => setModelCenterOpen(false)} />}
       {analysisStudioOpen && <AnalysisStudio onClose={() => setAnalysisStudioOpen(false)} />}
-      {documentWorkspaceOpen && <DocumentWorkspace initialFiles={documentInitialFiles} onClose={() => { setDocumentWorkspaceOpen(false); setDocumentInitialFiles([]) }} onConfigureModel={() => { setDocumentWorkspaceOpen(false); setDocumentInitialFiles([]); setModelCenterOpen(true) }} />}
       {shortcutsOpen && (
         <div className="fixed inset-0 z-[75] bg-black/70 flex items-center justify-center p-6" onClick={() => setShortcutsOpen(false)}>
           <div className="w-full max-w-md rounded-2xl bg-player-surface border border-white/10 p-6" onClick={(event) => event.stopPropagation()}>
