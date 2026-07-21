@@ -17,9 +17,11 @@ const SUPPORTED_EXTENSIONS = new Set([
   '.txt', '.md', '.csv', '.json', '.srt', '.vtt',
   '.docx', '.doc', '.xlsx', '.pptx', '.pdf',
   '.odt', '.ods', '.odp', '.rtf', '.html', '.htm',
-  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp',
+  '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.wma'
 ])
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+const AUDIO_EXTS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.wma']
 const OUTPUT_FORMATS = new Set(['txt', 'md', 'docx', 'xlsx', 'pptx', 'pdf'])
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024
 const MAX_PROMPT_CHARS = 70000
@@ -54,6 +56,9 @@ function classifyTask(files, instruction, preferredOutput = 'auto') {
     const imageEdit = parseImageEditInstruction(text)
     if (imageEdit) return { kind: 'image-convert', outputFormat: imageEdit.format || exts[0].slice(1), requiresAi: false, summary: '本地图片转换', imageEdit }
     throw new Error('图片任务请说明：转成什么格式（png/jpg/webp），或压缩/缩放到什么程度')
+  }
+  if (files.length === 1 && AUDIO_EXTS.includes(exts[0]) && /转写|听写|转录|字幕|语音.*文字|识别.*说话|转成文字/.test(text)) {
+    return { kind: 'transcribe', outputFormat: /时间轴|srt|时间戳/.test(text) ? 'srt' : 'txt', requiresAi: false, summary: '离线语音转写' }
   }
   if (files.length === 2 && exts[0] === '.docx' && IMAGE_EXTS.includes(exts[1]) && /插图|配图|插到|插入|加入图片|加图|加一(?:张|幅)?图/.test(text)) {
     const anchorMatch = /(?:插到|加到|放在)[“"']?([^“"’”']+?)[”"']?\s*(?:后面|之后|下面)/.exec(text)
@@ -797,7 +802,7 @@ async function splitPdf(filePath, outputDir, baseName) {
 }
 
 class DocumentWorkspaceService {
-  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr, officeConvert, imageWindow }) {
+  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr, officeConvert, imageWindow, transcriber }) {
     this.outputRoot = outputRoot
     this.historyRoot = historyRoot
     this.complete = complete
@@ -805,6 +810,7 @@ class DocumentWorkspaceService {
     this.ocr = ocr || null
     this.officeConvert = officeConvert || null
     this.imageWindow = imageWindow || null
+    this.transcriber = transcriber || null
   }
 
   inspect(filePaths) {
@@ -966,6 +972,12 @@ class DocumentWorkspaceService {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pdf')
       const count = await extractPdfPages(plan.files[0].path, finalPath, plan.from, plan.to)
       result = { outputs: [finalPath], summary: `已提取第 ${plan.from}-${plan.to} 页（共 ${count} 页）` }
+    } else if (plan.kind === 'transcribe') {
+      if (!this.transcriber) throw new Error('当前平台没有可用的转写引擎')
+      const ext = plan.outputFormat === 'srt' ? 'srt' : 'txt'
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, ext)
+      const transcription = await this.transcriber.transcribeToFile(plan.files[0].path, finalPath, { timestamps: plan.outputFormat === 'srt' })
+      result = { outputs: [finalPath], summary: transcription.summary }
     } else if (plan.kind === 'image-convert') {
       if (!this.imageWindow) throw new Error('当前平台没有可用的图片转换器')
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, plan.imageEdit.format || plan.files[0].ext.slice(1))

@@ -68,7 +68,7 @@ test('both Windows installers repair the per-user Open with command without taki
 
 test('Windows installer registers the AgentPlay document verb for documents, separate from the player', () => {
   const installer = fs.readFileSync(path.join(__dirname, '..', 'build', 'installer.nsh'), 'utf8')
-  const documentExts = ['.txt', '.md', '.csv', '.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.rtf', '.odt', '.ods', '.odp', '.html', '.htm']
+  const documentExts = ['.txt', '.md', '.csv', '.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.rtf', '.odt', '.ods', '.odp', '.html', '.htm', '.mp3', '.wav', '.m4a', '.flac', '.ogg']
   for (const ext of documentExts) {
     assert.ok(installer.includes(`SystemFileAssociations\\${ext}\\shell\\AgentPlayDocuments`), `missing verb for ${ext}`)
     assert.ok(!installer.includes(`SupportedTypes" "${ext}"`), `document ${ext} must stay out of the player Open with list`)

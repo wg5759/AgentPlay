@@ -41,8 +41,10 @@ const {
 } = require('./creative-studio-service')
 const { DocumentWorkspaceService, SUPPORTED_EXTENSIONS, pdfPageCount } = require('./document-workspace-service')
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+const AUDIO_MEDIA_EXTS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.wma']
 const { WinRtOcrService } = require('./ocr-service')
 const { OfficeConvertService } = require('./office-convert-service')
+const { TranscriptionService } = require('./transcription-service')
 const { splitOpenAnyPaths, isPathInsideRoots } = require('./open-any')
 const { rasterizePdfPages } = require('./pdf-rasterizer')
 const { LocalAiDownloadService } = require('./local-ai-download-service')
@@ -358,6 +360,33 @@ function createHiddenWindow({ width, height }) {
 const ocrService = new WinRtOcrService()
 const officeConvert = new OfficeConvertService()
 
+function resolveWhisperRoot() {
+  const packRoot = path.join(app.getPath('userData'), 'whisper-pack')
+  if (fs.existsSync(path.join(packRoot, 'engine', 'whisper-cli.exe')) && fs.existsSync(path.join(packRoot, 'ggml-tiny.bin'))) return packRoot
+  if (!app.isPackaged) return path.join(__dirname, '..', 'resources', 'whisper')
+  return packRoot
+}
+
+const transcriptionService = new TranscriptionService({
+  whisperRoot: resolveWhisperRoot(),
+  mpvPath: app.isPackaged
+    ? path.join(process.resourcesPath, 'bin', 'win', 'mpv.com')
+    : path.join(__dirname, '..', 'resources', 'bin', 'win', 'mpv.com')
+})
+
+async function transcribeToFile(sourcePath, finalPath, { timestamps = false } = {}) {
+  const transcription = await transcriptionService.transcribe({
+    sourcePath,
+    timestamps,
+    onProgress: (stage) => log.info(`转写进度: ${stage}`)
+  })
+  const tempPath = `${finalPath}.${process.pid}.tmp`
+  fs.mkdirSync(path.dirname(finalPath), { recursive: true })
+  fs.writeFileSync(tempPath, `${transcription.text}\n`, 'utf8')
+  fs.renameSync(tempPath, finalPath)
+  return { summary: `离线转写完成（${transcription.text.length} 字${timestamps ? '，含时间轴' : ''}）` }
+}
+
 async function recognizePdfWithOcr(filePath) {
   const status = await ocrService.detect()
   if (!status.available) return null
@@ -522,6 +551,7 @@ app.whenReady().then(async () => {
     ocr: { recognizePdf: recognizePdfWithOcr },
     officeConvert,
     imageWindow: createHiddenWindow,
+    transcriber: { transcribeToFile },
     complete: async ({ systemPrompt, prompt, signal }) => {
       let config = modelConfigStore.resolved('chat')
       let usesBundledRuntime = false
@@ -800,7 +830,8 @@ app.whenReady().then(async () => {
     if (result.canceled) return { media: [], documents: [] }
     const split = splitOpenAnyPaths(result.filePaths, {
       inspectDocuments: (paths) => {
-        if (IMAGE_EXTS.includes(path.extname(paths[0]).toLowerCase())) throw new Error('图片走播放器')
+        const ext = path.extname(paths[0]).toLowerCase()
+        if (IMAGE_EXTS.includes(ext) || AUDIO_MEDIA_EXTS.includes(ext)) throw new Error('图片/音视频走播放器')
         return documentWorkspace.inspect(paths)
       },
       isMediaPath: (filePath, ext) => ALL_EXTS.includes(ext),
