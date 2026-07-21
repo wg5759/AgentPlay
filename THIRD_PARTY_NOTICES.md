@@ -13,7 +13,7 @@
 | docx | AI 文档工作台生成 DOCX，9.5.1 | MIT；<https://docx.js.org/> |
 | PptxGenJS | AI 文档工作台生成 PPTX，4.0.1 | MIT；<https://gitbrent.github.io/PptxGenJS/> |
 | pdf-lib | AI 文档工作台合并、拆分 PDF，1.17.1 | MIT；<https://pdf-lib.js.org/> |
-| PDF.js (pdfjs-dist) | AI 文档工作台提取 PDF 文字层，3.11.174 | Apache-2.0；<https://mozilla.github.io/pdf.js/> |
+| unpdf（内嵌 PDF.js） | AI 文档工作台提取 PDF 文字层，1.6.x | MIT；<https://github.com/unjs/unpdf> |
 | JSZip | 提取 PPTX 中的可读文本，3.10.1 | MIT 或 GPL-3.0-or-later；<https://stuk.github.io/jszip/> |
 | Formidable | 显式开启的局域网上传，3.5.x | MIT；<https://github.com/node-formidable/formidable> |
 | mpv | 播放与 MP4 渲染；v0.41.0、commit `41f6a645...`，本项目可复现 GPL 构建的本地文件与发布清单哈希一致 | 本构建明确启用 GPL；许可证与来源证据位于 `resources/licenses/mpv/`；[二进制、清单与完整对应源码](https://github.com/wg5759/AgentPlay/releases/tag/mpv-gpl-v0.41.0-20260719) |

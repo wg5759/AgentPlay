@@ -140,32 +140,33 @@ async function extractText(filePath) {
 }
 
 async function extractPdfText(filePath) {
-  // 懒加载 pdfjs：只在真正处理 PDF 时才载入，避免拖慢应用启动。
-  const { getDocument } = require('pdfjs-dist/legacy/build/pdf.js')
+  // 懒加载 unpdf（内嵌 PDF.js）：只在真正处理 PDF 时才载入，避免拖慢应用启动。
+  const { getDocumentProxy, extractText: extractPdfPages } = require('unpdf')
   const data = new Uint8Array(fs.readFileSync(filePath))
   let pdf
   try {
-    pdf = await getDocument({ data, isEvalSupported: false, disableFontFace: true, useSystemFonts: true }).promise
+    pdf = await getDocumentProxy(data)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (/password/i.test(message)) throw new Error('这份 PDF 有打开密码，请先解除密码后再试')
     throw new Error(`PDF 打开失败：${message}`)
   }
   try {
+    const { totalPages, text } = await extractPdfPages(pdf, { mergePages: false })
+    const pages = Array.isArray(text) ? text : [String(text || '')]
+    const maxPages = Math.min(pages.length || pdf.numPages || 0, 200)
     const chunks = []
-    const maxPages = Math.min(pdf.numPages, 200)
-    for (let pageNumber = 1; pageNumber <= maxPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber)
-      const content = await page.getTextContent()
-      const text = content.items.map((item) => ('str' in item ? item.str : '')).join('').replace(/[ \t]{2,}/g, ' ').trim()
-      if (text) chunks.push(`## 第 ${pageNumber} 页\n${text}`)
+    for (let index = 0; index < maxPages; index += 1) {
+      const pageText = String(pages[index] || '').replace(/[ \t]{2,}/g, ' ').trim()
+      if (pageText) chunks.push(`## 第 ${index + 1} 页\n${pageText}`)
     }
     const joined = chunks.join('\n\n').trim()
     if (!joined) throw new Error('这份 PDF 没有可提取的文字层（可能是扫描件或图片型 PDF）；扫描件 OCR 识别将在下一阶段提供')
-    const suffix = pdf.numPages > maxPages ? `\n\n（仅提取前 ${maxPages} 页，共 ${pdf.numPages} 页）` : ''
+    const total = totalPages || pages.length
+    const suffix = total > maxPages ? `\n\n（仅提取前 ${maxPages} 页，共 ${total} 页）` : ''
     return `${joined}${suffix}`.slice(0, MAX_PROMPT_CHARS)
   } finally {
-    void pdf.destroy()
+    if (pdf && typeof pdf.destroy === 'function') void pdf.destroy()
   }
 }
 
