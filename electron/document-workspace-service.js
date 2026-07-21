@@ -9,13 +9,17 @@ const { Document, HeadingLevel, Packer, Paragraph, TextRun } = require('docx')
 const { PDFDocument } = require('pdf-lib')
 const { editDocx, parseEditInstruction } = require('./docx-editor')
 const { editPptx, parsePptxEditInstruction } = require('./pptx-editor')
+const { convertImage, parseImageEditInstruction } = require('./image-convert-service')
+const { insertImageIntoDocx } = require('./docx-image')
 const { FormulaError, analyzeFormula, columnIndex, columnLetters, evaluateFormula } = require('./formula-engine')
 
 const SUPPORTED_EXTENSIONS = new Set([
   '.txt', '.md', '.csv', '.json', '.srt', '.vtt',
   '.docx', '.doc', '.xlsx', '.pptx', '.pdf',
-  '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'
+  '.odt', '.ods', '.odp', '.rtf', '.html', '.htm',
+  '.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'
 ])
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
 const OUTPUT_FORMATS = new Set(['txt', 'md', 'docx', 'xlsx', 'pptx', 'pdf'])
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024
 const MAX_PROMPT_CHARS = 70000
@@ -46,6 +50,18 @@ function classifyTask(files, instruction, preferredOutput = 'auto') {
     ? preferredOutput
     : outputFormatFromInstruction(text, exts[0] === '.xlsx' ? 'xlsx' : 'docx')
 
+  if (files.length === 1 && IMAGE_EXTS.includes(exts[0])) {
+    const imageEdit = parseImageEditInstruction(text)
+    if (imageEdit) return { kind: 'image-convert', outputFormat: imageEdit.format || exts[0].slice(1), requiresAi: false, summary: '本地图片转换', imageEdit }
+    throw new Error('图片任务请说明：转成什么格式（png/jpg/webp），或压缩/缩放到什么程度')
+  }
+  if (files.length === 2 && exts[0] === '.docx' && IMAGE_EXTS.includes(exts[1]) && /插图|配图|插到|插入|加入图片|加图|加一(?:张|幅)?图/.test(text)) {
+    const anchorMatch = /(?:插到|加到|放在)[“"']?([^“"’”']+?)[”"']?\s*(?:后面|之后|下面)/.exec(text)
+    return { kind: 'docx-insert-image', outputFormat: 'docx', requiresAi: false, summary: '本地 DOCX 插图', anchor: anchorMatch ? anchorMatch[1].trim() : null }
+  }
+  if (files.length === 1 && ['.docx', '.pptx'].includes(exts[0]) && /提取图片|导出图片|把.*图片.*拿|抠图/.test(text)) {
+    return { kind: 'extract-images', outputFormat: 'files', requiresAi: false, summary: '提取文档内嵌图片' }
+  }
   if (files.length >= 2 && exts.every((ext) => ext === '.pdf') && /合并|拼接|combine|merge/i.test(text)) {
     return { kind: 'pdf-merge', outputFormat: 'pdf', requiresAi: false, summary: `合并 ${files.length} 个 PDF` }
   }
@@ -542,6 +558,18 @@ function findHeaderColumn(sheet, headerName) {
   return found
 }
 
+async function extractEmbeddedImages(filePath, targetDir) {
+  const archive = await JSZip.loadAsync(fs.readFileSync(filePath))
+  const mediaNames = Object.keys(archive.files).filter((name) => /^(word|ppt)\/media\/[^/]+$/.test(name) && !archive.files[name].dir)
+  if (mediaNames.length === 0) throw new Error('这份文档里没有内嵌图片')
+  fs.mkdirSync(targetDir, { recursive: true })
+  for (const name of mediaNames) {
+    const buffer = await archive.file(name).async('nodebuffer')
+    fs.writeFileSync(path.join(targetDir, path.basename(name)), buffer)
+  }
+  return mediaNames.length
+}
+
 function parseDedupeColumn(instruction, sheet) {
   const match = String(instruction).match(/(?:按|根据)\s*[“"']?([^，。；;"']+?)[”"']?\s*(?:列)?去重/)
   if (!match) return 1
@@ -769,13 +797,14 @@ async function splitPdf(filePath, outputDir, baseName) {
 }
 
 class DocumentWorkspaceService {
-  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr, officeConvert }) {
+  constructor({ outputRoot, historyRoot, complete, renderPdf, ocr, officeConvert, imageWindow }) {
     this.outputRoot = outputRoot
     this.historyRoot = historyRoot
     this.complete = complete
     this.renderPdf = renderPdf
     this.ocr = ocr || null
     this.officeConvert = officeConvert || null
+    this.imageWindow = imageWindow || null
   }
 
   inspect(filePaths) {
@@ -937,6 +966,19 @@ class DocumentWorkspaceService {
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'pdf')
       const count = await extractPdfPages(plan.files[0].path, finalPath, plan.from, plan.to)
       result = { outputs: [finalPath], summary: `已提取第 ${plan.from}-${plan.to} 页（共 ${count} 页）` }
+    } else if (plan.kind === 'image-convert') {
+      if (!this.imageWindow) throw new Error('当前平台没有可用的图片转换器')
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, plan.imageEdit.format || plan.files[0].ext.slice(1))
+      const converted = await convertImage({ sourcePath: plan.files[0].path, finalPath, instruction: plan.instruction, createWindow: this.imageWindow })
+      result = { outputs: [finalPath], summary: `已转换为 ${converted.format.toUpperCase()}（${(converted.bytes / 1024).toFixed(0)}KB）` }
+    } else if (plan.kind === 'docx-insert-image') {
+      const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'docx')
+      const inserted = await insertImageIntoDocx(plan.files[0].path, plan.files[1].path, finalPath, { anchor: plan.anchor })
+      result = { outputs: [finalPath], summary: `已把图片插入文档（${inserted.width}×${inserted.height}${plan.anchor ? `，位置：${plan.anchor} 之后` : '，文档末尾'}）` }
+    } else if (plan.kind === 'extract-images') {
+      const targetDir = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-图片`, 'dir').replace(/\.dir$/, '')
+      const extracted = await extractEmbeddedImages(plan.files[0].path, targetDir)
+      result = { outputs: [targetDir], summary: `已提取 ${extracted} 张内嵌图片到 ${targetDir}` }
     } else if (plan.kind === 'spreadsheet-edit') {
       const formulaPlan = plan.requiresAi ? await this.buildFormulaPlan(plan, options) : null
       const finalPath = uniqueOutputPath(outputDir, `${path.parse(plan.files[0].name).name}-AgentPlay处理版`, 'xlsx')

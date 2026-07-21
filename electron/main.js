@@ -40,6 +40,7 @@ const {
   synthesizeSystemVoice
 } = require('./creative-studio-service')
 const { DocumentWorkspaceService, SUPPORTED_EXTENSIONS, pdfPageCount } = require('./document-workspace-service')
+const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
 const { WinRtOcrService } = require('./ocr-service')
 const { OfficeConvertService } = require('./office-convert-service')
 const { splitOpenAnyPaths, isPathInsideRoots } = require('./open-any')
@@ -520,6 +521,7 @@ app.whenReady().then(async () => {
     renderPdf: renderHtmlToPdf,
     ocr: { recognizePdf: recognizePdfWithOcr },
     officeConvert,
+    imageWindow: createHiddenWindow,
     complete: async ({ systemPrompt, prompt, signal }) => {
       let config = modelConfigStore.resolved('chat')
       let usesBundledRuntime = false
@@ -797,7 +799,10 @@ app.whenReady().then(async () => {
     })
     if (result.canceled) return { media: [], documents: [] }
     const split = splitOpenAnyPaths(result.filePaths, {
-      inspectDocuments: (paths) => documentWorkspace.inspect(paths),
+      inspectDocuments: (paths) => {
+        if (IMAGE_EXTS.includes(path.extname(paths[0]).toLowerCase())) throw new Error('图片走播放器')
+        return documentWorkspace.inspect(paths)
+      },
       isMediaPath: (filePath, ext) => ALL_EXTS.includes(ext),
       approveDocument: (file) => {
         const token = crypto.randomUUID()
