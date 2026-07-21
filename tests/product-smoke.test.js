@@ -68,7 +68,7 @@ test('both Windows installers repair the per-user Open with command without taki
 
 test('Windows installer registers the AgentPlay document verb for documents, separate from the player', () => {
   const installer = fs.readFileSync(path.join(__dirname, '..', 'build', 'installer.nsh'), 'utf8')
-  const documentExts = ['.txt', '.md', '.csv', '.docx', '.xlsx', '.pptx', '.pdf']
+  const documentExts = ['.txt', '.md', '.csv', '.docx', '.xlsx', '.pptx', '.pdf', '.doc', '.rtf', '.odt', '.ods', '.odp', '.html', '.htm']
   for (const ext of documentExts) {
     assert.ok(installer.includes(`SystemFileAssociations\\${ext}\\shell\\AgentPlayDocuments`), `missing verb for ${ext}`)
     assert.ok(!installer.includes(`SupportedTypes" "${ext}"`), `document ${ext} must stay out of the player Open with list`)
@@ -126,7 +126,7 @@ test('unified conversation opens any file and runs document tasks inline', () =>
   assert.match(main, /chat:open-any/)
   assert.match(main, /splitOpenAnyPaths\(result\.filePaths/)
   assert.match(main, /approvedDocumentSelections\.set\(token, \{ path: file\.path/)
-  assert.match(preload, /chat: \{\s*openAny: \(\) => ipcRenderer\.invoke\('chat:open-any'\)\s*\}/)
+  assert.match(preload, /openAny: \(\) => ipcRenderer\.invoke\('chat:open-any'\)/)
   assert.match(panel, /chat\?\.openAny/)
   assert.match(panel, /attachments\.length > 0/)
   assert.match(panel, /api\.run\(\{ tokens, instruction, outputFormat: 'auto', cloudApproved/)
@@ -135,6 +135,26 @@ test('unified conversation opens any file and runs document tasks inline', () =>
   assert.match(panel, /system\?\.openPath\(output\)/)
   assert.match(app, /ai-player-play-file/)
   assert.match(globalTypes, /chat\?: \{[\s\S]{0,120}openAny/)
+  assert.match(globalTypes, /attachPaths/)
+  assert.match(preload, /attachPaths/)
+  assert.match(main, /chat:attach-paths/)
+  assert.match(main, /isPathInsideRoots\(filePath, roots/)
+})
+
+test('document previews are allowed by CSP while scripts stay self-only', () => {
+  const index = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8')
+  assert.match(index, /frame-src 'self' data: blob:/)
+  assert.match(index, /script-src 'self'/)
+  assert.match(index, /object-src 'none'/)
+})
+
+test('library context menu routes documents to the unified chat with authorized tokens', () => {
+  const library = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'MediaLibrary.tsx'), 'utf8')
+  const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'AgentPanel.tsx'), 'utf8')
+  assert.match(library, /onContextMenu=\{\(event\)/)
+  assert.match(library, /chat\?\.attachPaths\(\[menu\.file\.path\]\)/)
+  assert.match(library, /ai-player-attach-docs/)
+  assert.match(panel, /ai-player-attach-docs/)
 })
 
 test('AgentPlay branding preserves the 0.6.x internal app identity and existing user data', () => {

@@ -42,7 +42,7 @@ const {
 const { DocumentWorkspaceService, SUPPORTED_EXTENSIONS, pdfPageCount } = require('./document-workspace-service')
 const { WinRtOcrService } = require('./ocr-service')
 const { OfficeConvertService } = require('./office-convert-service')
-const { splitOpenAnyPaths } = require('./open-any')
+const { splitOpenAnyPaths, isPathInsideRoots } = require('./open-any')
 const { rasterizePdfPages } = require('./pdf-rasterizer')
 const { LocalAiDownloadService } = require('./local-ai-download-service')
 const LOCAL_AI_PACK = require('./local-ai-pack-manifest')
@@ -76,6 +76,7 @@ const activeAiRequests = new Map()
 const activeComputerUseRequests = new Map()
 const activeDocumentRequests = new Map()
 const approvedDocumentSelections = new Map()
+const authorizedFolders = new Set()
 
 ipcMain.on('app:version', (event) => {
   event.returnValue = app.getVersion()
@@ -417,7 +418,7 @@ function setWindowPreset(preset, mediaSize = null) {
 const menuTemplate = [
   { label: '文件', submenu: [
     { label: '打开文件…', accelerator: 'CmdOrCtrl+O', click: async () => { const filePath = await chooseFile(); if (filePath) mainWindow?.webContents.send('menu:openFile', filePath) } },
-    { label: '打开文件夹…', accelerator: 'CmdOrCtrl+Shift+O', click: async () => { const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] }); if (!r.canceled) mainWindow?.webContents.send('menu:openFolder', r.filePaths[0]) } },
+    { label: '打开文件夹…', accelerator: 'CmdOrCtrl+Shift+O', click: async () => { const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] }); if (!r.canceled) { authorizedFolders.add(r.filePaths[0]); mainWindow?.webContents.send('menu:openFolder', r.filePaths[0]) } } },
     { label: '添加网络源…', click: () => sendAction('network-source') },
     { type: 'separator' },
     { role: 'quit', label: '退出' }
@@ -793,6 +794,14 @@ app.whenReady().then(async () => {
       }
     })
   })
+  ipcMain.handle('chat:attach-paths', (event, filePaths) => {
+    assertTrustedSender(event)
+    const roots = [...authorizedFolders]
+    const requested = Array.isArray(filePaths) ? filePaths.slice(0, 20) : []
+    const valid = requested.filter((filePath) => isPathInsideRoots(filePath, roots, { realpathSync: (value) => fs.realpathSync(value) }))
+    if (valid.length === 0) return { documents: [], skipped: requested.length }
+    return { documents: approveDocumentPaths(valid), skipped: requested.length - valid.length }
+  })
   ipcMain.handle('models:providers', (event) => {
     assertTrustedSender(event)
     return PROVIDERS
@@ -1134,7 +1143,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('cast:scan', () => castService.scan())
   ipcMain.handle('cast:cast', (_e, deviceId, filePath) => castService.cast(deviceId, filePath))
   ipcMain.handle('dialog:openFile', () => chooseFile())
-  ipcMain.handle('dialog:openFolder', async () => { const { dialog } = require('electron'); const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] }); return r.canceled ? null : r.filePaths[0] })
+  ipcMain.handle('dialog:openFolder', async () => { const { dialog } = require('electron'); const r = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] }); if (r.canceled) return null; authorizedFolders.add(r.filePaths[0]); return r.filePaths[0] })
   ipcMain.handle('system:openPath', async (_e, filePath) => {
     const { shell } = require('electron')
     if (!fs.existsSync(filePath)) return { success: false, error: '文件不存在' }

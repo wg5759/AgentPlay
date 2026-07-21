@@ -53,6 +53,18 @@ export default function AgentPanel() {
     return off
   }, [])
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const docs = (event as CustomEvent<Array<{ token: string; name: string; ext: string; size: number }>>).detail
+      if (!Array.isArray(docs) || docs.length === 0) return
+      useAgentStore.getState().openPanel()
+      setAttachments((current) => [...current, ...docs])
+      void window.aiPlayer?.documents?.capabilities().then((caps) => { if (caps) setDocCaps((current) => current || caps) })
+    }
+    window.addEventListener('ai-player-attach-docs', handler)
+    return () => window.removeEventListener('ai-player-attach-docs', handler)
+  }, [])
+
   const openAny = async () => {
     const result = await window.aiPlayer?.chat?.openAny?.()
     if (!result) return

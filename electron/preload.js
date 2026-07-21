@@ -46,7 +46,8 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     }
   },
   chat: {
-    openAny: () => ipcRenderer.invoke('chat:open-any')
+    openAny: () => ipcRenderer.invoke('chat:open-any'),
+    attachPaths: (filePaths) => ipcRenderer.invoke('chat:attach-paths', filePaths)
   },
   documents: {
     capabilities: () => ipcRenderer.invoke('documents:capabilities'),

@@ -1,6 +1,6 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const { splitOpenAnyPaths } = require('../electron/open-any')
+const { splitOpenAnyPaths, isPathInsideRoots } = require('../electron/open-any')
 
 function harness() {
   const approvals = []
@@ -41,4 +41,20 @@ test('超过 20 个文件截断且顺序稳定', () => {
   const { media } = splitOpenAnyPaths(paths, harness())
   assert.equal(media.length, 20)
   assert.ok(media[0].endsWith('视频1.mp4'))
+})
+
+test('isPathInsideRoots 只放行授权文件夹内的路径', () => {
+  const realpathSync = (value) => value
+  const roots = ['D:\\媒体库', 'E:\\文档']
+  assert.equal(isPathInsideRoots('D:\\媒体库\\合同\\a.docx', roots, { realpathSync }), true)
+  assert.equal(isPathInsideRoots('D:\\媒体库', roots, { realpathSync }), true)
+  assert.equal(isPathInsideRoots('E:\\文档\\扫描.pdf', roots, { realpathSync }), true)
+  assert.equal(isPathInsideRoots('D:\\媒体库外\\a.docx', roots, { realpathSync }), false)
+  assert.equal(isPathInsideRoots('C:\\Windows\\System32\\x.docx', roots, { realpathSync }), false)
+  assert.equal(isPathInsideRoots('D:\\媒体库\\..\\秘密\\a.docx', roots, { realpathSync }), false)
+})
+
+test('isPathInsideRoots 对 realpath 失败 fail-closed', () => {
+  const realpathSync = () => { throw new Error('不存在') }
+  assert.equal(isPathInsideRoots('D:\\媒体库\\a.docx', ['D:\\媒体库'], { realpathSync }), false)
 })

@@ -76,6 +76,7 @@ interface AiPlayerAPI {
   }
   chat?: {
     openAny: () => Promise<{ media: string[]; documents: Array<{ token: string; name: string; ext: string; size: number }> }>
+    attachPaths: (filePaths: string[]) => Promise<{ documents: Array<{ token: string; name: string; ext: string; size: number }>; skipped: number }>
   }
   player?: AiPlayerPlayerAPI
   sync?: {

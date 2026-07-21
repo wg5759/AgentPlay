@@ -19,6 +19,7 @@ interface Props {
 
 export default function MediaLibrary({ onPlay, rootDir }: Props) {
   const openPanel = useAgentStore((s) => s.openPanel)
+  const [menu, setMenu] = useState<{ x: number; y: number; file: MediaFile } | null>(null)
   const [files, setFiles] = useState<MediaFile[]>([])
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [dedupResults, setDedupResults] = useState<Array<{ original: string; duplicate: string; name: string }> | null>(null)
@@ -441,6 +442,11 @@ export default function MediaLibrary({ onPlay, rootDir }: Props) {
               <div
                 key={f.path}
                 onClick={() => onPlay(f.name, f.path)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setMenu({ x: event.clientX, y: event.clientY, file: f })
+                }}
                 className="relative aspect-[2/3] bg-player-surface rounded-lg flex flex-col items-end justify-between p-3 hover:ring-2 ring-player-accent transition-all cursor-pointer"
               >
                 {posters[f.path]?.poster && (
@@ -488,6 +494,31 @@ export default function MediaLibrary({ onPlay, rootDir }: Props) {
           </div>
         )}
       </div>
+      {menu && (
+        <div className="fixed inset-0 z-[70]" onClick={() => setMenu(null)} onContextMenu={(event) => { event.preventDefault(); setMenu(null) }}>
+          <div
+            className="absolute min-w-44 rounded-lg border border-white/10 bg-[#151515] py-1 shadow-2xl"
+            style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 150) }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button className="block w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-white/10" onClick={() => { onPlay(menu.file.name, menu.file.path); setMenu(null) }}>打开</button>
+            <button className="block w-full px-4 py-2 text-left text-sm text-gray-200 hover:bg-white/10" onClick={() => {
+              const cut = Math.max(menu.file.path.lastIndexOf('\\'), menu.file.path.lastIndexOf('/'))
+              void window.aiPlayer?.system?.openPath(cut > 0 ? menu.file.path.slice(0, cut) : menu.file.path)
+              setMenu(null)
+            }}>打开所在文件夹</button>
+            {['.txt', '.md', '.csv', '.json', '.srt', '.vtt', '.doc', '.docx', '.xlsx', '.pptx', '.pdf', '.odt', '.ods', '.odp', '.rtf', '.html', '.htm'].includes(menu.file.ext) && (
+              <button className="block w-full px-4 py-2 text-left text-sm text-blue-300 hover:bg-white/10" onClick={async () => {
+                const result = await window.aiPlayer?.chat?.attachPaths([menu.file.path])
+                setMenu(null)
+                if (result?.documents?.length) {
+                  window.dispatchEvent(new CustomEvent('ai-player-attach-docs', { detail: result.documents }))
+                }
+              }}>用 AgentPlay 智能处理</button>
+            )}
+          </div>
+        </div>
+      )}
       {castFile && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"

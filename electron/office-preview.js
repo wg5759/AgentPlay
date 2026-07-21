@@ -27,8 +27,20 @@ function buildSpreadsheetHtml(rows) {
 }
 
 async function previewDocx(filePath) {
-  if (path.extname(filePath).toLowerCase() !== '.docx') {
-    return { success: false, error: '仅支持安全预览 .docx，旧格式请使用系统 Office 打开' }
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.doc') {
+    try {
+      const WordExtractor = require('word-extractor')
+      const document = await new WordExtractor().extract(filePath)
+      const text = String(document.getBody() || '').trim()
+      if (!text) return { success: false, error: '这份 DOC 没有可预览的文字内容' }
+      return { success: true, html: text.split(/\r?\n/).map((line) => `<p>${escapeHtml(line) || '&nbsp;'}</p>`).join('') }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  }
+  if (ext !== '.docx') {
+    return { success: false, error: '仅支持安全预览 .docx/.doc，其他格式请使用系统 Office 打开' }
   }
   try {
     const result = await mammoth.convertToHtml({ path: filePath })

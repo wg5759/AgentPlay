@@ -26,3 +26,27 @@ function splitOpenAnyPaths(filePaths, { inspectDocuments, isMediaPath, approveDo
 }
 
 module.exports = { splitOpenAnyPaths }
+
+// 路径是否落在任一用户授权过的文件夹内（用于库内文件直接附带为文档任务来源）。
+// realpath 归一化后做前缀判断，防符号链接逃逸。
+function isPathInsideRoots(filePath, roots, { realpathSync } = {}) {
+  const realpath = realpathSync || ((value) => value)
+  let resolved
+  try {
+    resolved = realpath(filePath)
+  } catch {
+    return false
+  }
+  const normalized = path.resolve(String(resolved)).toLowerCase()
+  return (Array.isArray(roots) ? roots : []).some((root) => {
+    let normalizedRoot
+    try {
+      normalizedRoot = path.resolve(String(realpath(root))).toLowerCase()
+    } catch {
+      return false
+    }
+    return normalized === normalizedRoot || normalized.startsWith(`${normalizedRoot}${path.sep}`)
+  })
+}
+
+module.exports = { splitOpenAnyPaths, isPathInsideRoots }
