@@ -31,7 +31,7 @@ const { ComputerUseOrchestrator } = require('./computer-use-orchestrator')
 const { ScreenCaptureService } = require('./screen-capture-service')
 const { BundledLocalRuntime } = require('./bundled-local-runtime')
 const { extractExternalMediaPaths, hasDocumentVerbFlag, extractDocumentVerbPaths } = require('./external-media-open')
-const { buildOfflineAnalysis, loadAnalysisContext, renderRecut } = require('./analysis-studio-service')
+const { buildOfflineAnalysis, loadAnalysisContext, renderRecut, findAdjacentSubtitle, parseSubtitleCues } = require('./analysis-studio-service')
 const { detectAnalysisIntent, resolveAnalysisOutput, runChatAnalysis } = require('./analysis-chat-service')
 const {
   generateImageAsset,
@@ -46,7 +46,7 @@ const AUDIO_MEDIA_EXTS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.wma
 const { WinRtOcrService } = require('./ocr-service')
 const { OfficeConvertService } = require('./office-convert-service')
 const { TranscriptionService } = require('./transcription-service')
-const { parseSrt, buildBilingualSrt, translateEntries } = require('./subtitle-bilingual-service')
+const { parseSrt, buildBilingualSrt, translateEntries, cuesToEntries, runLiveTranslation } = require('./subtitle-bilingual-service')
 const { splitOpenAnyPaths, isPathInsideRoots } = require('./open-any')
 const { rasterizePdfPages } = require('./pdf-rasterizer')
 const { LocalAiDownloadService } = require('./local-ai-download-service')
@@ -81,6 +81,7 @@ const activeAiRequests = new Map()
 const activeComputerUseRequests = new Map()
 const activeDocumentRequests = new Map()
 const activeAnalysisRequests = new Map()
+let liveSubtitleSession = null
 const approvedDocumentSelections = new Map()
 const authorizedFolders = new Set()
 const userAuthorizedPaths = new Set()
@@ -665,6 +666,7 @@ app.whenReady().then(async () => {
       item('截取当前画面…', 'screenshot', { enabled: !!state.hasMedia }),
       item(state.subtitleVisible ? '关闭字幕' : '打开字幕', 'subtitle-toggle', { enabled: !!state.hasMedia }),
       item('生成双语字幕（离线识别+云端翻译）', 'bilingual-subtitle', { enabled: !!state.hasMedia }),
+      item(state.liveTranslate ? '停止实时翻译字幕' : '实时翻译字幕（译文排在原文下方）', 'live-translate-subtitle', { enabled: !!state.hasMedia }),
       item('拉片与原创重构…', 'analysis-studio', { enabled: !!state.hasMedia }),
       { label: '播放速度', submenu: [0.5, 0.75, 1, 1.25, 1.5, 2].map((rate) => item(`${rate}×`, `speed-${rate}`, { type: 'radio', checked: state.playbackRate === rate })) },
       { label: '画面比例', submenu: [
@@ -966,8 +968,6 @@ app.whenReady().then(async () => {
     if (!userAuthorizedPaths.has(path.resolve(mediaPath)) && !isPathInsideRoots(mediaPath, [...authorizedFolders], { realpathSync: (value) => fs.realpathSync(value) })) {
       return { success: false, error: '只允许处理你明确打开过或媒体库内的文件' }
     }
-    const whisperStatus = transcriptionService.availability()
-    if (!whisperStatus.available) return { success: false, error: `${whisperStatus.reason}，请先下载转写组件`, needDownload: true }
     const config = modelConfigStore.resolved('chat')
     const requiresKey = config.requiresKey !== false
     if (!config.baseUrl || !config.model || (requiresKey && !config.apiKey)) {
@@ -978,6 +978,23 @@ app.whenReady().then(async () => {
       if (!event.sender.isDestroyed()) event.sender.send('subtitle:bilingual-status', { requestId, status })
     }
     try {
+      // 有现成字幕（同名 srt/vtt/ass）时跳过语音识别，直接翻译，秒级出双语
+      const adjacent = findAdjacentSubtitle(mediaPath)
+      if (adjacent) {
+        sendStatus(`检测到现成字幕 ${path.basename(adjacent)}，跳过语音识别，直接翻译`)
+        const rawCues = parseSubtitleCues(fs.readFileSync(adjacent, 'utf8'), path.extname(adjacent))
+        const entries = cuesToEntries(rawCues)
+        if (entries.length === 0) return { success: false, error: '现成字幕内容为空，无法翻译' }
+        sendStatus(`共 ${entries.length} 句，正在逐批翻译`)
+        const { translations, failed } = await translateEntries(entries, llmComplete)
+        const bilingual = buildBilingualSrt(entries, translations)
+        const srtPath = path.join(path.dirname(mediaPath), `${path.parse(mediaPath).name}-AgentPlay双语.srt`)
+        fs.writeFileSync(srtPath, bilingual, 'utf8')
+        sendStatus('双语字幕已生成')
+        return { success: true, srtPath, count: entries.length, failed, fastPath: true }
+      }
+      const whisperStatus = transcriptionService.availability()
+      if (!whisperStatus.available) return { success: false, error: `${whisperStatus.reason}，请先下载转写组件`, needDownload: true }
       sendStatus('正在离线识别语音（CPU，约为音频时长数倍）')
       const transcription = await transcriptionService.transcribe({ sourcePath: mediaPath, lang: 'auto', timestamps: true })
       const entries = parseSrt(transcription.text)
@@ -992,6 +1009,86 @@ app.whenReady().then(async () => {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
+  })
+  // 实时双语字幕：从当前播放位置起逐批翻译，渲染进程叠显（原文上、译文下）；译完自动存双语 srt（不覆盖已有文件）
+  ipcMain.handle('subtitle:live-start', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const mediaPath = String(input.mediaPath || '').trim()
+    if (!mediaPath || /^(https?|blob):/i.test(mediaPath) || !fs.existsSync(mediaPath)) {
+      return { success: false, error: '实时翻译只支持本地媒体文件' }
+    }
+    if (!userAuthorizedPaths.has(path.resolve(mediaPath)) && !isPathInsideRoots(mediaPath, [...authorizedFolders], { realpathSync: (value) => fs.realpathSync(value) })) {
+      return { success: false, error: '只允许处理你明确打开过或媒体库内的文件' }
+    }
+    const requestedSubtitle = String(input.subtitlePath || '').trim()
+    const subtitlePath = requestedSubtitle && fs.existsSync(requestedSubtitle) ? requestedSubtitle : findAdjacentSubtitle(mediaPath)
+    if (!subtitlePath) return { success: false, error: '没有找到可翻译的字幕：请先加载字幕，或用“生成双语字幕”先识别' }
+    const ext = path.extname(subtitlePath).toLowerCase()
+    if (!['.srt', '.vtt', '.ass', '.ssa'].includes(ext)) return { success: false, error: '字幕格式不支持（仅 srt/vtt/ass/ssa）' }
+    const rawCues = parseSubtitleCues(fs.readFileSync(subtitlePath, 'utf8'), ext)
+    if (!rawCues.length) return { success: false, error: '字幕内容为空，无法翻译' }
+    const config = modelConfigStore.resolved('chat')
+    const requiresKey = config.requiresKey !== false
+    if (!config.baseUrl || !config.model || (requiresKey && !config.apiKey)) {
+      return { success: false, error: '实时翻译需要已配置的模型，请先在模型接入中心配置' }
+    }
+    liveSubtitleSession?.controller.abort()
+    const requestId = normalizeRequestId(input.requestId, 'live-sub')
+    const controller = new AbortController()
+    const cues = rawCues.map((cue, order) => ({ index: order + 1, startSeconds: cue.start, endSeconds: cue.end, text: cue.text }))
+    const entries = cuesToEntries(rawCues)
+    const targetLang = String(input.targetLang || '中文').slice(0, 20)
+    liveSubtitleSession = { requestId, controller, position: Number(input.currentTime) || 0 }
+    const send = (payload) => {
+      if (!event.sender.isDestroyed()) event.sender.send('subtitle:live-event', { requestId, ...payload })
+    }
+    ;(async () => {
+      try {
+        const result = await runLiveTranslation({
+          cues, complete: llmComplete, signal: controller.signal, targetLang,
+          getPosition: () => (liveSubtitleSession?.requestId === requestId ? liveSubtitleSession.position : 0),
+          onBatch: async ({ batch, translations, failed }) => {
+            send({
+              type: 'progress', done: translations.size, failed: failed.size, total: cues.length,
+              batch: batch.map((entry) => ({ index: entry.index, text: translations.get(entry.index) || '' })).filter((item) => item.text)
+            })
+          }
+        })
+        let srtPath = null
+        if (result.translations.size) {
+          const candidate = path.join(path.dirname(mediaPath), `${path.parse(mediaPath).name}-AgentPlay双语.srt`)
+          try {
+            if (!fs.existsSync(candidate)) {
+              fs.writeFileSync(candidate, buildBilingualSrt(entries, result.translations), 'utf8')
+            }
+            srtPath = candidate
+          } catch (error) { log.error('实时双语字幕写盘失败', error) }
+        }
+        send({ type: 'finish', done: result.translations.size, failed: result.failed, total: cues.length, srtPath, cancelled: result.cancelled })
+      } catch (error) {
+        send({ type: 'error', error: error instanceof Error ? error.message : String(error) })
+      } finally {
+        if (liveSubtitleSession?.requestId === requestId) liveSubtitleSession = null
+      }
+    })()
+    return { success: true, requestId, total: cues.length, subtitlePath, cues: cues.map((cue) => ({ index: cue.index, start: cue.startSeconds, end: cue.endSeconds, text: cue.text })) }
+  })
+  ipcMain.handle('subtitle:live-seek', (event, input = {}) => {
+    assertTrustedSender(event)
+    if (liveSubtitleSession && liveSubtitleSession.requestId === String(input.requestId || '')) {
+      liveSubtitleSession.position = Number(input.currentTime) || 0
+      return true
+    }
+    return false
+  })
+  ipcMain.handle('subtitle:live-stop', (event, requestId) => {
+    assertTrustedSender(event)
+    if (liveSubtitleSession && (!requestId || liveSubtitleSession.requestId === String(requestId))) {
+      liveSubtitleSession.controller.abort()
+      liveSubtitleSession = null
+      return true
+    }
+    return false
   })
   ipcMain.handle('models:stop-bundled', async (event) => {
     assertTrustedSender(event)

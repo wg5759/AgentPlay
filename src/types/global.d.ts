@@ -112,6 +112,29 @@ interface AiPlayerAPI {
     generate: (input: { path: string; requestId: string }) => Promise<{ success: boolean; error?: string; needDownload?: boolean; srtPath?: string; count?: number; failed?: number }>
     onStatus: (cb: (event: { requestId: string; status: string }) => void) => () => void
   }
+  subtitleLive?: {
+    start: (input: { mediaPath: string; subtitlePath?: string; currentTime?: number; targetLang?: string; requestId: string }) => Promise<{
+      success: boolean
+      error?: string
+      requestId?: string
+      total?: number
+      subtitlePath?: string
+      cues?: Array<{ index: number; start: number; end: number; text: string }>
+    }>
+    seek: (input: { requestId: string; currentTime: number }) => Promise<boolean>
+    stop: (requestId?: string) => Promise<boolean>
+    onEvent: (cb: (event: {
+      requestId: string
+      type: 'progress' | 'finish' | 'error'
+      done?: number
+      failed?: number
+      total?: number
+      batch?: Array<{ index: number; text: string }>
+      srtPath?: string | null
+      cancelled?: boolean
+      error?: string
+    }) => void) => () => void
+  }
   player?: AiPlayerPlayerAPI
   sync?: {
     url: () => Promise<string | null>
@@ -224,7 +247,7 @@ interface AiPlayerAPI {
     onAgent: (cb: () => void) => () => void
   }
   contextMenu?: {
-    show: (state: { hasMedia: boolean; isPlaying: boolean; subtitleVisible: boolean; pictureMode: string; playbackRate: number }) => void
+    show: (state: { hasMedia: boolean; isPlaying: boolean; subtitleVisible: boolean; pictureMode: string; playbackRate: number; liveTranslate?: boolean }) => void
   }
   windowControls?: {
     setPreset: (preset: 'original' | 'half' | 'fill' | 'fullscreen', mediaSize?: { width: number; height: number }) => Promise<boolean>

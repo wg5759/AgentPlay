@@ -81,6 +81,10 @@ export default function PlayerView({ onBack }: Props) {
   const [subtitleStatus, setSubtitleStatus] = useState('')
   const [bilingualBusy, setBilingualBusy] = useState(false)
   const [subtitlePanelOpen, setSubtitlePanelOpen] = useState(false)
+  const [liveSub, setLiveSub] = useState<{ requestId: string; cues: Array<{ index: number; start: number; end: number; text: string }> } | null>(null)
+  const liveTranslationsRef = useRef(new Map<number, string>())
+  const liveSeekSentRef = useRef(0)
+  const subtitleFileRef = useRef('')
 
   const isDesktop = window.aiPlayer?.isElectron === true
   const fileType = getFileType(mediaName)
@@ -327,6 +331,8 @@ export default function PlayerView({ onBack }: Props) {
       else setPlaybackNotice('')
     } else if (action === 'bilingual-subtitle') {
       void generateBilingual()
+    } else if (action === 'live-translate-subtitle') {
+      void toggleLiveTranslate()
     } else if (action.startsWith('window-')) {
       applyWindowPreset(action.slice(7) as 'original' | 'half' | 'fill' | 'fullscreen')
     }
@@ -391,7 +397,79 @@ export default function PlayerView({ onBack }: Props) {
     }
   }
 
-  const applySubtitle = async (subtitlePath: string, ext: string) => {    if (useMpv) {
+  const liveRequestIdRef = useRef('')
+  useEffect(() => {
+    const off = window.aiPlayer?.subtitleLive?.onEvent((event) => {
+      if (event.requestId !== liveRequestIdRef.current) return
+      if (event.type === 'progress' && event.batch) {
+        for (const item of event.batch) liveTranslationsRef.current.set(item.index, item.text)
+        setSubtitleStatus(`实时翻译中 ${event.done}/${event.total}${event.failed ? `（${event.failed} 句未译）` : ''}`)
+      } else if (event.type === 'finish') {
+        setSubtitleStatus(event.cancelled ? '实时翻译已停止' : `实时翻译完成（${event.done}/${event.total} 句${event.failed ? `，${event.failed} 句未译` : ''}）`)
+        if (useMpv) {
+          if (event.srtPath) void applySubtitle(event.srtPath, 'srt')
+          setLiveSub(null)
+          liveRequestIdRef.current = ''
+        }
+      } else if (event.type === 'error') {
+        setSubtitleStatus(event.error || '实时翻译出错')
+        setLiveSub(null)
+        liveRequestIdRef.current = ''
+      }
+    })
+    return off
+  }, [useMpv])
+
+  const toggleLiveTranslate = async () => {
+    const api = window.aiPlayer?.subtitleLive
+    if (!api) return
+    if (liveSub) {
+      await api.stop(liveSub.requestId)
+      liveRequestIdRef.current = ''
+      setLiveSub(null)
+      liveTranslationsRef.current = new Map()
+      setSubtitleStatus('实时翻译已关闭')
+      return
+    }
+    if (!videoSrc || videoSrc.startsWith('blob:') || /^https?:/i.test(videoSrc)) {
+      setSubtitlePanelOpen(true)
+      setSubtitleStatus('实时翻译只支持本地文件；请先打开本地视频。')
+      return
+    }
+    const requestId = `live-sub-${Date.now()}`
+    liveRequestIdRef.current = requestId
+    liveTranslationsRef.current = new Map()
+    setSubtitlePanelOpen(true)
+    setSubtitleStatus('正在准备实时翻译…')
+    const result = await api.start({ mediaPath: videoSrc, subtitlePath: subtitleFileRef.current, currentTime: usePlayerStore.getState().currentTime, requestId })
+    if (!result.success || !result.cues) {
+      liveRequestIdRef.current = ''
+      setSubtitleStatus(result.error || '实时翻译启动失败')
+      return
+    }
+    setLiveSub({ requestId: result.requestId || requestId, cues: result.cues })
+    setSubtitleStatus(`实时翻译已开启（${result.total} 句，从当前位置向前翻译）`)
+  }
+
+  useEffect(() => {
+    if (!liveSub) return
+    const api = window.aiPlayer?.subtitleLive
+    if (!api) return
+    if (Math.abs(currentTime - liveSeekSentRef.current) < 4) return
+    liveSeekSentRef.current = currentTime
+    void api.seek({ requestId: liveSub.requestId, currentTime })
+  }, [currentTime, liveSub])
+
+  useEffect(() => () => {
+    if (liveRequestIdRef.current) {
+      void window.aiPlayer?.subtitleLive?.stop(liveRequestIdRef.current)
+      liveRequestIdRef.current = ''
+      setLiveSub(null)
+    }
+  }, [videoSrc])
+
+  const applySubtitle = async (subtitlePath: string, ext: string) => {    subtitleFileRef.current = subtitlePath
+    if (useMpv) {
       const loaded = await window.aiPlayer?.player?.loadSubtitle(subtitlePath)
       if (!loaded) throw new Error('mpv 未能加载字幕')
     } else {
@@ -486,9 +564,9 @@ export default function PlayerView({ onBack }: Props) {
 
   useEffect(() => {
     if (trackRef.current?.track) {
-      trackRef.current.track.mode = usePlayerStore.getState().subtitleVisible ? 'showing' : 'hidden'
+      trackRef.current.track.mode = usePlayerStore.getState().subtitleVisible && !liveSub ? 'showing' : 'hidden'
     }
-  }, [subtitleUrl, subtitleVisible])
+  }, [subtitleUrl, subtitleVisible, liveSub])
 
   useEffect(() => () => {
     if (subtitleUrl?.startsWith('blob:')) URL.revokeObjectURL(subtitleUrl)
@@ -536,7 +614,8 @@ export default function PlayerView({ onBack }: Props) {
           isPlaying,
           subtitleVisible,
           pictureMode,
-          playbackRate
+          playbackRate,
+          liveTranslate: !!liveSub
         })
       }}
       onDoubleClick={() => {
@@ -586,6 +665,17 @@ export default function PlayerView({ onBack }: Props) {
           {playbackNotice}
         </div>
       )}
+      {liveSub && !useMpv && (() => {
+        const cue = liveSub.cues.find((item) => currentTime >= item.start && currentTime <= item.end)
+        if (!cue) return null
+        const translated = liveTranslationsRef.current.get(cue.index)
+        return (
+          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 max-w-3xl text-center pointer-events-none">
+            <span className="inline-block rounded bg-black/70 px-3 py-1 text-lg text-white" style={{ textShadow: '0 1px 3px #000' }}>{cue.text}</span>
+            {translated && <span className="mt-1 inline-block rounded bg-black/70 px-3 py-1 text-base text-cyan-200" style={{ textShadow: '0 1px 3px #000' }}>{translated}</span>}
+          </div>
+        )
+      })()}
       {useMpv && <div className="text-gray-600 text-sm">mpv 播放内核已连接</div>}
       {fileType === 'audio' && fileUrl && !useMpv && (
         <div className="text-center">

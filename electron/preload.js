@@ -223,6 +223,16 @@ contextBridge.exposeInMainWorld('aiPlayer', {
       return () => ipcRenderer.removeListener('subtitle:bilingual-status', handler)
     }
   },
+  subtitleLive: {
+    start: (input) => ipcRenderer.invoke('subtitle:live-start', input),
+    seek: (input) => ipcRenderer.invoke('subtitle:live-seek', input),
+    stop: (requestId) => ipcRenderer.invoke('subtitle:live-stop', requestId),
+    onEvent: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('subtitle:live-event', handler)
+      return () => ipcRenderer.removeListener('subtitle:live-event', handler)
+    }
+  },
   xlsx: {
     preview: (filePath) => ipcRenderer.invoke('xlsx:preview', filePath)
   },
