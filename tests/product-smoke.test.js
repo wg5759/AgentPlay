@@ -29,10 +29,10 @@ test('playing media auto-hides chrome after idle while paused or blocked UI stay
   const playerView = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PlayerView.tsx'), 'utf8')
   const controls = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PlayerControls.tsx'), 'utf8')
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8')
-  assert.match(playerView, /setPlaybackChromeVisible\(controlsVisible \|\| !isMedia\)/)
+  assert.match(playerView, /setPlaybackChromeVisible\(!isMedia\)/)
   assert.match(playerView, /onClick={searchOnlineSubtitle}[\s\S]{0,500}controlsVisible \? 'opacity-100'/)
   assert.match(controls, /data-player-chrome="true"/)
-  assert.match(main, /window:setPlaybackChromeVisible[\s\S]{0,220}setMenuBarVisibility/)
+  assert.match(main, /window:setPlaybackChromeVisible[\s\S]{0,420}setMenuBarVisibility/)
   assert.match(main, /window:isPlaybackChromeVisible[\s\S]{0,180}isMenuBarVisible/)
 })
 

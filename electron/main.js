@@ -706,7 +706,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('window:setPreset', (_e, preset, mediaSize) => setWindowPreset(preset, mediaSize))
   ipcMain.handle('window:setPlaybackChromeVisible', (_e, visible) => {
     if (!mainWindow || mainWindow.isDestroyed()) return false
-    if (process.platform !== 'darwin') mainWindow.setMenuBarVisibility(Boolean(visible))
+    if (process.platform !== 'darwin') {
+      // 播放期间菜单栏全程隐藏（Alt 可唤出），不随控制栏显隐：
+      // 菜单栏显隐会改变客户区高度(~21px)，把按钮挪到静止光标下触发 pointerenter，形成显隐循环
+      mainWindow.setAutoHideMenuBar(!visible)
+      mainWindow.setMenuBarVisibility(Boolean(visible))
+    }
     return true
   })
   ipcMain.handle('window:isPlaybackChromeVisible', () => {

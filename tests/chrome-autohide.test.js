@@ -34,6 +34,9 @@ test('player view routes mousemove through the jitter threshold and closes subti
   assert.match(view, /onInteractionEnd={scheduleAutoHide}/)
   assert.match(view, /onPointerLeave={scheduleAutoHide}/)
   assert.doesNotMatch(view, /onPointerLeave={handleUserActivity}/)
+  // 菜单栏只随有无媒体切换，不随控制栏显隐：显隐改变客户区高度会把按钮挪到静止光标下形成循环
+  assert.match(view, /setPlaybackChromeVisible\(!isMedia\)/)
+  assert.doesNotMatch(view, /setPlaybackChromeVisible\(controlsVisible/)
   // 点击控制控件后必须立即归还焦点，否则隐藏计时到点看到焦点在控制区会永久放弃隐藏
   assert.match(view, /onClickCapture=\{releaseChromeFocus\}/)
   assert.match(view, /onPointerUpCapture=\{releaseChromeFocus\}/)

@@ -119,6 +119,22 @@ check('播放中静止 3 秒后控制栏已隐藏', p.op, '0') }
   await delay(3600)
   { const p3 = JSON.parse(await probe()); console.log('  probe(+7s)', p3.ae, p3.op) }
 
+  // 布局不变量：控制栏显隐不得改变窗口内容高度（高度变化会把按钮挪到静止光标下形成显隐循环）
+  await moveMouse(500, 300)
+  await moveMouse(540, 330)
+  await delay(400)
+  const heightVisible = await evaluate('innerHeight')
+  await delay(3400)
+  const heightHidden = await evaluate('innerHeight')
+  check('控制栏显隐不改变窗口内容高度', `${heightVisible}→${heightHidden}`, `${heightVisible}→${heightVisible}`)
+
+  // 鼠标停在顶部栏附近（用户最常停放的位置）：不得因布局位移触发显隐循环
+  await moveMouse(200, 24)
+  await delay(4200)
+  { const p4 = JSON.parse(await probe()); console.log('  probe(顶部悬停)', p4.ae, p4.op); check('鼠标停在顶部 4 秒后控制栏仍隐藏', p4.op, '0') }
+  await delay(3600)
+  { const p5 = JSON.parse(await probe()); console.log('  probe(顶部悬停+8s)', p5.ae, p5.op); check('鼠标停在顶部 8 秒后控制栏仍隐藏（无循环）', p5.op, '0') }
+
   console.log(failures === 0 ? 'SMOKE_OK 控制栏自动隐藏与鼠标阈值全部通过' : `SMOKE_FAIL ${failures} 项未过`)
 } finally {
   try { websocket?.close() } catch {}

@@ -299,8 +299,9 @@ export default function PlayerView({ onBack }: Props) {
   }, [clearHideTimer, handleUserActivity])
 
   useEffect(() => {
-    void window.aiPlayer?.windowControls?.setPlaybackChromeVisible(controlsVisible || !isMedia)
-  }, [controlsVisible, isMedia])
+    // 播放期间菜单栏全程隐藏（Alt 唤出），不随控制栏显隐：避免客户区高度变化把按钮挪到静止光标下
+    void window.aiPlayer?.windowControls?.setPlaybackChromeVisible(!isMedia)
+  }, [isMedia])
 
   useEffect(() => () => {
     void window.aiPlayer?.windowControls?.setPlaybackChromeVisible(true)
