@@ -7,6 +7,16 @@ files:
   - dist/**/*
   - electron/**/*
   - '!node_modules/canvas/**'
+  # 本配置只出 Windows x64 包：剔除 onnxruntime 其它平台/架构的原生二进制（约 150MB）
+  - '!node_modules/onnxruntime-node/bin/napi-v6/darwin/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v6/linux/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64/**'
+asarUnpack:
+  # 原生模块必须解出 asar：onnxruntime-node 的 .node/.dll、sharp 与 @img/* 的 libvips 二进制
+  - '**/node_modules/onnxruntime-node/**'
+  - '**/node_modules/onnxruntime-common/**'
+  - '**/node_modules/sharp/**'
+  - '**/node_modules/@img/**'
 extraResources:
   - from: resources/bin/win
     to: bin/win

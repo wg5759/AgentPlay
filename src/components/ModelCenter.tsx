@@ -44,6 +44,8 @@ export default function ModelCenter({ onClose }: Props) {
   const [bundledStatus, setBundledStatus] = useState<BundledModelStatus | null>(null)
   const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; reason: string; download: Partial<LocalAiDownloadProgress> & { active: boolean }; pack: { totalBytes: number } } | null>(null)
   const [whisperError, setWhisperError] = useState('')
+  const [translateStatus, setTranslateStatus] = useState<{ available: boolean; reason: string; download: Partial<LocalAiDownloadProgress> & { active: boolean }; pack: { totalBytes: number } } | null>(null)
+  const [translateError, setTranslateError] = useState('')
   const [downloadProgress, setDownloadProgress] = useState<LocalAiDownloadProgress | null>(null)
   const [downloadActive, setDownloadActive] = useState(false)
   const [downloadError, setDownloadError] = useState('')
@@ -92,7 +94,11 @@ export default function ModelCenter({ onClose }: Props) {
     const offWhisper = window.aiPlayer?.transcribe?.onProgress?.(() => {
       void window.aiPlayer?.transcribe?.status().then((status) => { if (active && status) setWhisperStatus(status) })
     })
-    return () => { active = false; offProgress?.(); offWhisper?.() }
+    void window.aiPlayer?.translatePack?.status().then((status) => { if (active && status) setTranslateStatus(status) })
+    const offTranslate = window.aiPlayer?.translatePack?.onProgress?.(() => {
+      void window.aiPlayer?.translatePack?.status().then((status) => { if (active && status) setTranslateStatus(status) })
+    })
+    return () => { active = false; offProgress?.(); offWhisper?.(); offTranslate?.() }
   }, [])
 
   const changeRole = async (nextRole: ModelRole) => {
@@ -212,6 +218,22 @@ export default function ModelCenter({ onClose }: Props) {
 
   const cancelWhisperDownload = async () => {
     await window.aiPlayer?.transcribe?.cancelDownload()
+  }
+
+  const startTranslateDownload = async () => {
+    setTranslateError('')
+    try {
+      const result = await window.aiPlayer?.translatePack?.download()
+      if (!result?.success) throw new Error(result?.error || '下载失败')
+      const status = await window.aiPlayer?.translatePack?.status()
+      if (status) setTranslateStatus(status)
+    } catch (error) {
+      setTranslateError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const cancelTranslateDownload = async () => {
+    await window.aiPlayer?.translatePack?.cancelDownload()
   }
 
   const startBundled = async () => {
@@ -350,6 +372,27 @@ export default function ModelCenter({ onClose }: Props) {
               <div className="mt-3">
                 <div className="h-2 overflow-hidden rounded-full bg-black/40"><div className="h-full bg-violet-500 transition-all" style={{ width: `${Math.min(100, Math.round(((whisperStatus.download.receivedBytes || 0) / (whisperStatus.download.totalBytes || 1)) * 100))}%` }} /></div>
                 <div className="mt-1 text-xs text-gray-400">{whisperStatus.download.currentFile || '下载中'} · {((whisperStatus.download.receivedBytes || 0) / 1024 / 1024).toFixed(0)}/{((whisperStatus.download.totalBytes || 0) / 1024 / 1024).toFixed(0)}MB</div>
+              </div>
+            )}
+          </div>}
+
+          {role === 'chat' && translateStatus && <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm text-emerald-100">离线翻译组件 · OPUS-MT 英译中</div>
+                <div className="mt-1 text-xs text-gray-500">约 {Math.round((translateStatus.pack?.totalBytes || 0) / 1024 / 1024)}MB · 纯本地翻译英文字幕，不用云模型、不发任何内容出机</div>
+                {!translateStatus.available && !translateStatus.download?.active && <div className="mt-2 text-xs text-amber-300">{translateStatus.reason}；下载一次即可离线使用。</div>}
+                {translateStatus.available && <div className="mt-2 text-xs text-emerald-300">已就绪：双语字幕与实时翻译遇到英文字幕时自动走本地，其它语言仍用云端模型。</div>}
+                {translateError && <div className="mt-2 text-xs text-red-300">{translateError}</div>}
+              </div>
+              {!translateStatus.available && (translateStatus.download?.active
+                ? <button onClick={() => void cancelTranslateDownload()} className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15">取消下载</button>
+                : <button disabled={busy} onClick={() => void startTranslateDownload()} className="rounded-lg bg-emerald-600/80 px-4 py-2 text-sm hover:bg-emerald-600 disabled:opacity-40">下载离线翻译组件</button>)}
+            </div>
+            {translateStatus.download?.active && (
+              <div className="mt-3">
+                <div className="h-2 overflow-hidden rounded-full bg-black/40"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${Math.min(100, Math.round(((translateStatus.download.receivedBytes || 0) / (translateStatus.download.totalBytes || 1)) * 100))}%` }} /></div>
+                <div className="mt-1 text-xs text-gray-400">{translateStatus.download.currentFile || '下载中'} · {((translateStatus.download.receivedBytes || 0) / 1024 / 1024).toFixed(0)}/{((translateStatus.download.totalBytes || 0) / 1024 / 1024).toFixed(0)}MB</div>
               </div>
             )}
           </div>}

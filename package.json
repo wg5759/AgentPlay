@@ -22,6 +22,7 @@
     "check": "pnpm exec tsc --noEmit && pnpm exec eslint src --max-warnings=0 && pnpm security:scan && pnpm release:public:verify && pnpm test && pnpm build:web"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "docx": "9.5.1",
     "electron-log": "^5.4.4",
     "exceljs": "4.4.0",
@@ -139,11 +140,13 @@
   },
   "pnpm": {
     "overrides": {
-      "exceljs>uuid": "11.1.1"
+      "exceljs>uuid": "11.1.1",
+      "onnxruntime-node": "1.24.3"
     },
     "onlyBuiltDependencies": [
       "electron",
-      "esbuild"
+      "esbuild",
+      "sharp"
     ]
   }
 }

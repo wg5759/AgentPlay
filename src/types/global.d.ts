@@ -108,6 +108,12 @@ interface AiPlayerAPI {
     cancelDownload: () => Promise<boolean>
     onProgress: (cb: (progress: LocalAiDownloadProgress) => void) => () => void
   }
+  translatePack?: {
+    status: () => Promise<{ available: boolean; missing: string[]; reason: string; modelDir: string; download: Partial<LocalAiDownloadProgress> & { active: boolean; installed: boolean; presentBytes: number; totalBytes: number }; pack: { tag: string; totalBytes: number; assetCount: number } }>
+    download: () => Promise<{ success: boolean; error?: string; availability?: unknown }>
+    cancelDownload: () => Promise<boolean>
+    onProgress: (cb: (progress: LocalAiDownloadProgress) => void) => () => void
+  }
   subtitleBilingual?: {
     generate: (input: { path: string; requestId: string }) => Promise<{ success: boolean; error?: string; needDownload?: boolean; srtPath?: string; count?: number; failed?: number }>
     onStatus: (cb: (event: { requestId: string; status: string }) => void) => () => void

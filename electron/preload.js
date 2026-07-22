@@ -215,6 +215,16 @@ contextBridge.exposeInMainWorld('aiPlayer', {
       return () => ipcRenderer.removeListener('transcribe:progress', handler)
     }
   },
+  translatePack: {
+    status: () => ipcRenderer.invoke('translatePack:status'),
+    download: () => ipcRenderer.invoke('translatePack:download'),
+    cancelDownload: () => ipcRenderer.invoke('translatePack:cancel-download'),
+    onProgress: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('translatePack:progress', handler)
+      return () => ipcRenderer.removeListener('translatePack:progress', handler)
+    }
+  },
   subtitleBilingual: {
     generate: (input) => ipcRenderer.invoke('subtitle:bilingual-generate', input),
     onStatus: (cb) => {

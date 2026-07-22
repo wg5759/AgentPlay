@@ -82,6 +82,7 @@ const activeComputerUseRequests = new Map()
 const activeDocumentRequests = new Map()
 const activeAnalysisRequests = new Map()
 let liveSubtitleSession = null
+let llmComplete = null
 const approvedDocumentSelections = new Map()
 const authorizedFolders = new Set()
 const userAuthorizedPaths = new Set()
@@ -383,6 +384,24 @@ const whisperDownload = new LocalAiDownloadService({
   manifest: WHISPER_PACK,
   logger: log
 })
+const TRANSLATE_PACK = require('./translate-pack-manifest')
+const translateDownload = new LocalAiDownloadService({
+  installRoot: path.join(app.getPath('userData'), 'translate-pack'),
+  manifest: TRANSLATE_PACK,
+  logger: log
+})
+const { OfflineTranslateService, shouldUseOffline } = require('./offline-translate-service')
+const offlineTranslate = new OfflineTranslateService({
+  modelRoot: path.join(app.getPath('userData'), 'translate-pack', 'models')
+})
+
+// 字幕翻译路由：离线翻译组件可用且任务为"英→中"时纯本地翻译；否则回退到已配置云端模型
+function pickTranslateEngine(entries, targetLang = '中文') {
+  if (offlineTranslate.availability().available && shouldUseOffline(entries, targetLang)) {
+    return { complete: (input) => offlineTranslate.jsonComplete(input), label: '离线翻译组件', offline: true }
+  }
+  return { complete: llmComplete, label: '云端模型', offline: false }
+}
 
 async function transcribeToFile(sourcePath, finalPath, { timestamps = false } = {}) {
   const transcription = await transcriptionService.transcribe({
@@ -554,7 +573,7 @@ app.whenReady().then(async () => {
     logger: log
   })
   agentEngine = new AgentEngine(mpv)
-  const llmComplete = async ({ systemPrompt, prompt, signal }) => {
+  llmComplete = async ({ systemPrompt, prompt, signal }) => {
     let config = modelConfigStore.resolved('chat')
     let usesBundledRuntime = false
     try {
@@ -961,6 +980,31 @@ app.whenReady().then(async () => {
     assertTrustedSender(event)
     return whisperDownload.cancel()
   })
+  ipcMain.handle('translatePack:status', (event) => {
+    assertTrustedSender(event)
+    return {
+      ...offlineTranslate.availability(),
+      download: translateDownload.status(),
+      pack: translateDownload.packInfo()
+    }
+  })
+  ipcMain.handle('translatePack:download', async (event) => {
+    assertTrustedSender(event)
+    try {
+      await translateDownload.start({
+        onProgress: (progress) => {
+          if (!event.sender.isDestroyed()) event.sender.send('translatePack:progress', progress)
+        }
+      })
+      return { success: true, availability: offlineTranslate.availability() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('translatePack:cancel-download', (event) => {
+    assertTrustedSender(event)
+    return translateDownload.cancel()
+  })
   ipcMain.handle('subtitle:bilingual-generate', async (event, input = {}) => {
     assertTrustedSender(event)
     const mediaPath = String(input.path || '').trim()
@@ -970,8 +1014,10 @@ app.whenReady().then(async () => {
     }
     const config = modelConfigStore.resolved('chat')
     const requiresKey = config.requiresKey !== false
-    if (!config.baseUrl || !config.model || (requiresKey && !config.apiKey)) {
-      return { success: false, error: '双语字幕的翻译需要云端模型，请先在模型接入中心配置' }
+    const cloudReady = Boolean(config.baseUrl && config.model && (!requiresKey || config.apiKey))
+    const offlineReady = offlineTranslate.availability().available
+    if (!cloudReady && !offlineReady) {
+      return { success: false, error: '翻译需要云端模型或离线翻译组件，请先在模型接入中心配置或下载' }
     }
     const requestId = String(input.requestId || 'bilingual')
     const sendStatus = (status) => {
@@ -985,8 +1031,10 @@ app.whenReady().then(async () => {
         const rawCues = parseSubtitleCues(fs.readFileSync(adjacent, 'utf8'), path.extname(adjacent))
         const entries = cuesToEntries(rawCues)
         if (entries.length === 0) return { success: false, error: '现成字幕内容为空，无法翻译' }
-        sendStatus(`共 ${entries.length} 句，正在逐批翻译`)
-        const { translations, failed } = await translateEntries(entries, llmComplete)
+        const engine = pickTranslateEngine(entries)
+        if (!engine.offline && !cloudReady) return { success: false, error: '当前字幕不是英文为主，离线组件翻不了，请先配置云端模型' }
+        sendStatus(`共 ${entries.length} 句，正在逐批翻译（${engine.label}）`)
+        const { translations, failed } = await translateEntries(entries, engine.complete)
         const bilingual = buildBilingualSrt(entries, translations)
         const srtPath = path.join(path.dirname(mediaPath), `${path.parse(mediaPath).name}-AgentPlay双语.srt`)
         fs.writeFileSync(srtPath, bilingual, 'utf8')
@@ -999,8 +1047,10 @@ app.whenReady().then(async () => {
       const transcription = await transcriptionService.transcribe({ sourcePath: mediaPath, lang: 'auto', timestamps: true })
       const entries = parseSrt(transcription.text)
       if (entries.length === 0) return { success: false, error: '没有识别到语音内容（可能是纯音乐或音量过低）' }
-      sendStatus(`识别到 ${entries.length} 句，正在逐批翻译`)
-      const { translations, failed } = await translateEntries(entries, llmComplete)
+      const engine = pickTranslateEngine(entries)
+      if (!engine.offline && !cloudReady) return { success: false, error: '识别出的内容不是英文为主，离线组件翻不了，请先配置云端模型' }
+      sendStatus(`识别到 ${entries.length} 句，正在逐批翻译（${engine.label}）`)
+      const { translations, failed } = await translateEntries(entries, engine.complete)
       const bilingual = buildBilingualSrt(entries, translations)
       const srtPath = path.join(path.dirname(mediaPath), `${path.parse(mediaPath).name}-AgentPlay双语.srt`)
       fs.writeFileSync(srtPath, bilingual, 'utf8')
@@ -1029,8 +1079,10 @@ app.whenReady().then(async () => {
     if (!rawCues.length) return { success: false, error: '字幕内容为空，无法翻译' }
     const config = modelConfigStore.resolved('chat')
     const requiresKey = config.requiresKey !== false
-    if (!config.baseUrl || !config.model || (requiresKey && !config.apiKey)) {
-      return { success: false, error: '实时翻译需要已配置的模型，请先在模型接入中心配置' }
+    const cloudReady = Boolean(config.baseUrl && config.model && (!requiresKey || config.apiKey))
+    const engine = pickTranslateEngine(rawCues.map((text, order) => ({ index: order + 1, text: text.text })))
+    if (!engine.offline && !cloudReady) {
+      return { success: false, error: offlineTranslate.availability().available ? '当前字幕不是英文为主，离线组件翻不了，请先配置云端模型' : '实时翻译需要云端模型或离线翻译组件，请先在模型接入中心配置或下载' }
     }
     liveSubtitleSession?.controller.abort()
     const requestId = normalizeRequestId(input.requestId, 'live-sub')
@@ -1045,7 +1097,7 @@ app.whenReady().then(async () => {
     ;(async () => {
       try {
         const result = await runLiveTranslation({
-          cues, complete: llmComplete, signal: controller.signal, targetLang,
+          cues, complete: engine.complete, signal: controller.signal, targetLang,
           getPosition: () => (liveSubtitleSession?.requestId === requestId ? liveSubtitleSession.position : 0),
           onBatch: async ({ batch, translations, failed }) => {
             send({
