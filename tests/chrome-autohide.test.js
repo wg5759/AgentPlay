@@ -30,6 +30,14 @@ test('player view routes mousemove through the jitter threshold and closes subti
   assert.match(view, /onMouseMove=\{handleMouseMove\}/)
   assert.match(view, /isRealMouseActivity\(last, next\)/)
   assert.doesNotMatch(view, /onMouseMove=\{handleUserActivity\}/)
+  // 离开控件区域只重新武装隐藏计时、不强制显示，否则隐藏瞬间 pointerleave 会再显示形成抖动循环
+  assert.match(view, /onInteractionEnd={scheduleAutoHide}/)
+  assert.match(view, /onPointerLeave={scheduleAutoHide}/)
+  assert.doesNotMatch(view, /onPointerLeave={handleUserActivity}/)
+  // 点击控制控件后必须立即归还焦点，否则隐藏计时到点看到焦点在控制区会永久放弃隐藏
+  assert.match(view, /onClickCapture=\{releaseChromeFocus\}/)
+  assert.match(view, /onPointerUpCapture=\{releaseChromeFocus\}/)
+  assert.match(view, /\]\ button, \[data-player-chrome="true"\]\ input, \[data-player-chrome="true"\]\ select/)
   // 双语生成/实时翻译成功后必须关闭字幕面板，否则 blocked 永远为真、控制栏永不隐藏
   const bilingualBlock = view.slice(view.indexOf('const generateBilingual'), view.indexOf('const liveRequestIdRef'))
   assert.match(bilingualBlock, /setSubtitlePanelOpen\(false\)/)

@@ -249,16 +249,37 @@ export default function PlayerView({ onBack }: Props) {
     clearHideTimer()
   }, [clearHideTimer, setControlsVisible])
 
+  const hideControlsIfIdle = useCallback(() => {
+    // 点击控制按钮后焦点可能残留在按钮上：到点先释放按钮焦点（触发 onBlurCapture 重新武装一轮无妨），
+    // 再判定隐藏；滑杆/下拉等持续型控件保持"正在使用"判定，不强行隐藏。
+    const active = document.activeElement
+    if (active instanceof HTMLButtonElement && active.closest('[data-player-chrome="true"]')) active.blur()
+    const isUsingChrome = document.activeElement instanceof HTMLElement && Boolean(document.activeElement.closest('[data-player-chrome="true"]'))
+    if (!isUsingChrome && !useAgentStore.getState().open) setControlsVisible(false)
+  }, [setControlsVisible])
+
+  // 只武装隐藏计时，不强制显示：控制栏消失瞬间元素在光标下触发 pointerleave/blur，
+  // 若离开时又重新显示，就会形成 显示→3秒隐藏→再显示 的循环（窗口随菜单栏显隐抖动）。
+  const scheduleAutoHide = useCallback(() => {
+    clearHideTimer()
+    if (shouldAutoHideControls({ hasMedia: isMedia, playing: isPlaying, blocked: subtitlePanelOpen || agentOpen })) {
+      hideTimer.current = setTimeout(hideControlsIfIdle, PLAYER_CHROME_HIDE_DELAY_MS)
+    }
+  }, [agentOpen, clearHideTimer, hideControlsIfIdle, isMedia, isPlaying, subtitlePanelOpen])
+
   const handleUserActivity = useCallback(() => {
     holdControlsVisible()
-    if (shouldAutoHideControls({ hasMedia: isMedia, playing: isPlaying, blocked: subtitlePanelOpen || agentOpen })) {
-      hideTimer.current = setTimeout(() => {
-        const active = document.activeElement
-        const isUsingChrome = active instanceof HTMLElement && Boolean(active.closest('[data-player-chrome="true"]'))
-        if (!isUsingChrome && !useAgentStore.getState().open) setControlsVisible(false)
-      }, PLAYER_CHROME_HIDE_DELAY_MS)
-    }
-  }, [agentOpen, holdControlsVisible, isMedia, isPlaying, setControlsVisible, subtitlePanelOpen])
+    scheduleAutoHide()
+  }, [holdControlsVisible, scheduleAutoHide])
+
+  // 鼠标/触摸点完控制按钮就把焦点还回去（click/pointerup 后按钮已完成使命）；
+  // 否则焦点残留在按钮上，隐藏计时到点看到"焦点在控制区"会永久放弃隐藏。
+  // 键盘 Tab 操作不走 pointer 事件，焦点保留不受影响。
+  const releaseChromeFocus = useCallback((event: React.SyntheticEvent) => {
+    const target = event.target as HTMLElement
+    const control = target.closest?.('[data-player-chrome="true"] button, [data-player-chrome="true"] input, [data-player-chrome="true"] select')
+    if (control instanceof HTMLElement) window.setTimeout(() => control.blur(), 0)
+  }, [])
 
   // 光学/高轮询率鼠标静止时会持续发出 ±1~2px 的抖动事件，若每次都当用户活动，
   // 控制栏会被反复唤醒（永不隐藏），原生菜单栏跟着显隐导致整个窗口“抖动”。
@@ -617,6 +638,8 @@ export default function PlayerView({ onBack }: Props) {
       ref={playerRootRef}
       className={`flex-1 min-h-0 relative overflow-hidden bg-black flex items-center justify-center ${isMedia && !controlsVisible ? 'cursor-none' : ''}`}
       onMouseMove={handleMouseMove}
+      onClickCapture={releaseChromeFocus}
+      onPointerUpCapture={releaseChromeFocus}
       onPointerDown={handleUserActivity}
       onKeyDownCapture={handleUserActivity}
       onDrop={handleDrop}
@@ -768,7 +791,7 @@ export default function PlayerView({ onBack }: Props) {
         onClick={onBack}
         data-player-chrome="true"
         onPointerEnter={holdControlsVisible}
-        onPointerLeave={handleUserActivity}
+        onPointerLeave={scheduleAutoHide}
         className={`absolute top-4 left-4 px-3 py-1 bg-player-surface/80 rounded text-sm hover:bg-player-surface transition-opacity duration-300 ${
           controlsVisible || !isMedia ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
@@ -781,7 +804,7 @@ export default function PlayerView({ onBack }: Props) {
           onClick={searchOnlineSubtitle}
           data-player-chrome="true"
           onPointerEnter={holdControlsVisible}
-          onPointerLeave={handleUserActivity}
+          onPointerLeave={scheduleAutoHide}
           className={`absolute top-4 right-4 px-3 py-1 bg-player-surface/80 rounded text-sm hover:bg-player-surface transition-opacity duration-300 ${
             controlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
@@ -811,7 +834,7 @@ export default function PlayerView({ onBack }: Props) {
         </div>
       )}
 
-      {isMedia && <PlayerControls onInteractionStart={holdControlsVisible} onInteractionEnd={handleUserActivity} />}
+      {isMedia && <PlayerControls onInteractionStart={holdControlsVisible} onInteractionEnd={scheduleAutoHide} />}
     </div>
   )
 }
