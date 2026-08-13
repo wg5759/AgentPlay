@@ -1,5 +1,26 @@
 # AgentPlay
 
+<p align="center">
+  <img src="resources/icons/agentplay-mark.svg" width="88" alt="AgentPlay 飞鸽标识">
+</p>
+
+<p align="center">
+  <strong>一个入口，播放、下载、字幕、拉片、文档与 AI 创作。</strong>
+</p>
+
+<p align="center">
+  <a href="#下载">下载稳定版</a> ·
+  <a href="docs/QUICK_START.md">5 分钟上手</a> ·
+  <a href="https://github.com/wg5759/AgentPlay/discussions">交流与问答</a> ·
+  <a href="CONTRIBUTING.md">参与贡献</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/wg5759/AgentPlay/actions/workflows/build.yml"><img alt="Source quality" src="https://github.com/wg5759/AgentPlay/actions/workflows/build.yml/badge.svg?branch=master"></a>
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue.svg"></a>
+  <img alt="Windows 11 x64 verified" src="https://img.shields.io/badge/Windows_11_x64-verified-2ea44f">
+</p>
+
 AgentPlay 是一个面向 AI 时代的本地媒体工作台：在可靠播放的基础上，提供字幕、翻译、拉片、深度解剖、原创重构、成片渲染、模型接入与受控的电脑操作能力。
 
 开源项目、桌面端、Web/PWA、Android、浏览器扩展和安装包统一使用 `AgentPlay` 名称与飞鸽标识。为兼容已有安装和用户数据，内部包名仍为 `ai-player`、应用标识仍为 `com.aiplayer.app`；品牌升级不得清空模型、历史任务、授权设置或“打开方式”注册。
@@ -16,6 +37,16 @@ AgentPlay 是一个面向 AI 时代的本地媒体工作台：在可靠播放的
 - [Windows x64 标准版](https://github.com/wg5759/AgentPlay/releases/download/v0.7.6/AgentPlay-0.7.6-Windows-x64-Standard.exe)：不内置模型，SHA-256 `B6680A6AE570268D4BA81D5E74CC3DE2D626063FBADCF7387467606F7F63E8CF`
 
 当前版本未购买 Authenticode 代码签名证书，Windows SmartScreen 可能提示“未知发布者”。请只从上述官方 Release 下载并核对 SHA-256。
+
+## 5 分钟上手
+
+1. 从上面的官方 Release 下载稳定版并核对 SHA-256。
+2. 打开 AgentPlay 后，直接拖入本地视频、图片或办公文档；也可以粘贴 B站、YouTube、抖音、X 或 Facebook 链接。
+3. 对链接选择“仅下载”或“下载并拉片”；对本地文件直接播放、预览，再在同一输入框继续提出字幕、翻译、整理或分析要求。
+4. 只有使用 AI 能力时才需要选择“智能选择 / 只在本机 / 优先效果”。单纯播放、下载和本地文档转换不要求配置云模型。
+5. 结果与长任务进度在任务中心查看；程序重启后，可恢复的任务会从持久检查点继续。
+
+首次使用、模型选择、日志位置和问题反馈方式见 [5 分钟上手指南](docs/QUICK_START.md)。
 
 ## 已实现能力
 
@@ -101,4 +132,4 @@ pnpm release:public:verify
 - 仓库不提交安装包、大模型权重、第三方原生二进制、代码签名证书、用户媒体或 API Key；这些内容受体积、安全或各自许可证约束，不等于项目自研代码闭源。
 - `AgentPlay` 名称、飞鸽标识和官方发行版视觉识别保留品牌权利。允许修改和分发代码，但衍生版本不能冒充 AgentPlay 官方版本。
 
-参与开发请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请阅读 [SECURITY.md](SECURITY.md)。
+普通问题、功能讨论和成果展示请进入 [GitHub Discussions](https://github.com/wg5759/AgentPlay/discussions)；可复现缺陷请提交 [Issue](https://github.com/wg5759/AgentPlay/issues/new/choose)。完整支持边界见 [SUPPORT.md](SUPPORT.md)，参与开发请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请阅读 [SECURITY.md](SECURITY.md)。

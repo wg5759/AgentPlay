@@ -1,0 +1,91 @@
+name: Bug 报告
+description: 报告一个可以稳定复现的问题
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿上传 API Key、私密媒体、合同原件或包含个人信息的日志。
+  - type: input
+    id: version
+    attributes:
+      label: AgentPlay 版本
+      description: 在“帮助 → 关于”中查看；自行构建请同时填写 commit。
+      placeholder: 例如 0.7.6 / master@abcdef0
+    validations:
+      required: true
+  - type: dropdown
+    id: install_source
+    attributes:
+      label: 使用方式
+      options:
+        - GitHub Release 安装版
+        - 从源码运行
+        - 从源码自行打包
+        - Web / PWA
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: 操作系统与硬件
+      description: 请填写系统版本；播放、字幕或本地模型问题请补充 CPU、GPU 与内存。
+      placeholder: Windows 11 23H2，Intel i7，32GB RAM
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题区域
+      options:
+        - 播放与全屏
+        - 链接下载
+        - 字幕与翻译
+        - 视频拉片与创作
+        - 文档与 OCR
+        - 模型接入
+        - 安装、升级与恢复
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际发生了什么
+      description: 请写明界面最终显示的状态或完整错误信息。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 最小复现步骤
+      placeholder: |
+        1. 打开……
+        2. 选择……
+        3. 看到……
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 已脱敏日志或截图
+      description: 日志通常位于 `%APPDATA%\ai-player\logs\`。请删除 Key、Cookie、本地绝对路径、文件正文和个人信息。
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认没有提交 API Key、Cookie、私密媒体、合同正文或其他敏感信息。
+          required: true
+        - label: 这不是安全漏洞；若属于安全问题，我会按 SECURITY.md 私密报告。
+          required: true
