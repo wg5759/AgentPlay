@@ -162,16 +162,22 @@ function throwIfSubtitleAborted(signal) {
   if (signal?.aborted) throw subtitleAbortError(signal)
 }
 
-async function translateEntries(entries, complete, { batchSize = 20, targetLang = '中文', signal, onProgress } = {}) {
-  const translations = new Map()
+async function translateEntries(entries, complete, { batchSize = 20, targetLang = '中文', signal, onProgress, initialTranslations = [], onCheckpoint } = {}) {
+  const allowed = new Set(entries.map((entry) => entry.index))
+  const translations = new Map((Array.isArray(initialTranslations) ? initialTranslations : [])
+    .map((item) => [Number(item?.[0]), String(item?.[1] || '').trim()])
+    .filter(([index, text]) => allowed.has(index) && text))
   let failed = 0
   for (let start = 0; start < entries.length; start += batchSize) {
     throwIfSubtitleAborted(signal)
     const batch = entries.slice(start, start + batchSize)
+    const pendingBatch = batch.filter((entry) => !translations.has(entry.index))
     try {
-      const map = await translateBatch(batch, complete, { targetLang, signal })
-      throwIfSubtitleAborted(signal)
-      for (const [index, text] of map) translations.set(index, text)
+      if (pendingBatch.length) {
+        const map = await translateBatch(pendingBatch, complete, { targetLang, signal })
+        throwIfSubtitleAborted(signal)
+        for (const [index, text] of map) translations.set(index, text)
+      }
       failed += batch.filter((entry) => !translations.has(entry.index)).length
     } catch (error) {
       if (signal?.aborted || error?.name === 'AbortError') throw subtitleAbortError(signal)
@@ -183,6 +189,7 @@ async function translateEntries(entries, complete, { batchSize = 20, targetLang 
       translated: translations.size,
       failed
     })
+    await onCheckpoint?.({ translations: [...translations.entries()], done: Math.min(start + batch.length, entries.length), total: entries.length, failed })
   }
   return { translations, failed }
 }

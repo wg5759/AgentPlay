@@ -76,10 +76,23 @@ test('ebook wiring: IPC, preload, reader UI with offline/cloud translate and bil
   assert.match(main, /ensureCloudConsent\('电子书章节原文将发送给云端模型用于翻译。'\)/)
 })
 
+test('ebook download has caller-bounded attempts that finish before an outer test timeout', async () => {
+  assert.equal(typeof ebook.__test?.fetchBuffer, 'function')
+  let calls = 0
+  const fetchImpl = (_url, { signal }) => new Promise((_resolve, reject) => {
+    calls += 1
+    signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+  })
+  const started = Date.now()
+  await assert.rejects(() => ebook.__test.fetchBuffer('https://archive.org/test', { timeoutMs: 10, attempts: 2, retryDelayMs: 0, fetchImpl }), /下载超时/)
+  assert.equal(calls, 2)
+  assert.ok(Date.now() - started < 500, '内部有界重试必须早于外层测试硬超时结束')
+})
+
 test('real archive.org gutenberg: list book files, fetch epub and parse chapters', { timeout: 120000 }, async (t) => {
   let detail
   try {
-    detail = await onlineMedia.listBookFiles('prideandprejudic01342gut')
+    detail = await onlineMedia.listBookFiles('prideandprejudic01342gut', { timeoutMs: 15000, attempts: 2 })
   } catch (error) {
     t.skip(`网络不可用：${error.message}`)
     return
@@ -91,7 +104,7 @@ test('real archive.org gutenberg: list book files, fetch epub and parse chapters
   try {
     let bookPath
     try {
-      bookPath = await ebook.fetchBook(dir, 'prideandprejudic01342gut', epub.name)
+      bookPath = await ebook.fetchBook(dir, 'prideandprejudic01342gut', epub.name, { timeoutMs: 15000, attempts: 2 })
     } catch (error) {
       t.skip(`镜像网络不可用：${error.message}`)
       return

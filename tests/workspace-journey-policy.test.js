@@ -36,9 +36,18 @@ test('running download exposes its real current step', async () => {
 test('link analysis retains the full analysis journey and terminal states are explicit', async () => {
   const { workspaceJourneyForTask } = await import(policyUrl)
   const completed = workspaceJourneyForTask({ kind: 'link-analysis', phase: 'completed', running: false, status: '', outputs: ['report.md'] })
-  assert.deepEqual(completed.stages, ['获取内容', '理解画面', '生成结果', '继续创作'])
-  assert.equal(completed.activeStage, 3)
+  assert.deepEqual(completed.stages, ['获取内容', '理解画面', '生成报告'])
+  assert.equal(completed.activeStage, 2)
   assert.equal(completed.eyebrow, '分析完成')
   assert.equal(workspaceJourneyForTask({ kind: 'doc', phase: 'waiting', running: false, status: '等待允许云端处理', outputs: [] }).eyebrow, '等待确认')
   assert.equal(workspaceJourneyForTask({ kind: 'media', phase: 'failed', running: false, status: '', outputs: [] }).eyebrow, '处理失败')
+})
+
+test('unknown running work stays on the first real stage and exposes an honest time range', async () => {
+  const { workspaceJourneyForTask, taskTimingForTask } = await import(policyUrl)
+  const task = { kind: 'doc', phase: 'running', running: true, status: '正在准备任务', outputs: [] }
+  assert.equal(workspaceJourneyForTask(task).activeStage, 0)
+  assert.equal(workspaceJourneyForTask(task).stages.includes('继续编辑'), false)
+  assert.match(taskTimingForTask(task), /1–3 分钟/)
+  assert.equal(taskTimingForTask({ kind: 'creative', phase: 'running', running: true, status: '正在生成 4 秒视频（约 1-2 分钟）' }), '约 1-2 分钟')
 })

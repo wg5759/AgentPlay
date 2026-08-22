@@ -142,10 +142,10 @@ function assertArchiveUrl(url) {
 }
 
 // 书目文件：epub 优先（有章节结构），txt 兜底
-async function listBookFiles(identifier) {
+async function listBookFiles(identifier, { timeoutMs, attempts, fetchImpl } = {}) {
   const id = String(identifier || '').trim()
   if (!/^[A-Za-z0-9._-]+$/.test(id)) throw new Error('条目编号无效')
-  const data = await fetchJson(`${METADATA_URL}${encodeURIComponent(id)}`)
+  const data = await fetchJson(`${METADATA_URL}${encodeURIComponent(id)}`, { timeoutMs, attempts, fetchImpl })
   const files = (data?.files || [])
     .filter((file) => /\.(epub|txt)$/i.test(file.name || '') && !/_(djvu|bw|text)\.txt$/i.test(file.name))
     .map((file) => ({

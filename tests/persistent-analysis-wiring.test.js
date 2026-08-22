@@ -18,6 +18,8 @@ test('video analysis uses frozen source, unified approval and persistent runtime
   assert.match(main, /persistentTaskRuntime\.cancel\(String\(requestId/)
   assert.match(service, /onCheckpoint\?\.\(\{ stage: 'outputs-written'/)
   assert.match(service, /onCheckpoint\?\.\(\{ stage: 'history-written'/)
+  assert.match(service, /stage: 'analysis-model-complete'/)
+  assert.match(main, /resumeCheckpoint:\s*task\.checkpoint/)
   assert.match(hook, /workspaceTaskId:\s*executionTaskIdRef\.current/)
   assert.match(recovery, /analysis\.run/)
 })

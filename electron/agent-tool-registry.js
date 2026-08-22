@@ -17,8 +17,14 @@ const TOOL_SPECS = [
   { name: 'load_subtitle', description: '加载字幕文件（srt/ass/vtt）', parameters: { file_path: { type: 'string', description: '字幕文件路径' } }, required: ['file_path'], category: 'file', risk: 'control', cost: 1 },
   { name: 'batch_transcribe', description: '把当前已添加的音视频附件批量转写为字幕文件', parameters: {}, category: 'media', risk: 'local-write', cost: 4 },
   { name: 'compress_video', description: '压缩或转封装当前本地视频', parameters: { target_mb: { type: 'number', description: '压缩目标大小，单位 MB' }, mode: { type: 'string', enum: ['compress', 'remux'] } }, category: 'media', risk: 'local-write', cost: 4 },
+  { name: 'trim_video', description: '把当前本地视频精确剪出一个时间段并另存为新文件', parameters: { start_seconds: { type: 'number', description: '保留片段的开始秒数' }, end_seconds: { type: 'number', description: '保留片段的结束秒数，必须大于开始秒数' } }, required: ['start_seconds', 'end_seconds'], category: 'media', risk: 'local-write', cost: 4 },
+  { name: 'remove_video_segment', description: '从当前本地视频中精确删除一个时间段，自动拼接前后内容并另存为新文件', parameters: { start_seconds: { type: 'number', description: '删除片段的开始秒数' }, end_seconds: { type: 'number', description: '删除片段的结束秒数，必须大于开始秒数' } }, required: ['start_seconds', 'end_seconds'], category: 'media', risk: 'local-write', cost: 4 },
+  { name: 'concat_video_segments', description: '按给定顺序截取当前本地视频中的两个或更多时间段，拼接并另存为新文件', parameters: { segments: { type: 'array', minItems: 2, maxItems: 24, description: '按最终成片顺序排列的时间段，单次最多 24 个', items: { type: 'object', properties: { start_seconds: { type: 'number', description: '片段开始秒数' }, end_seconds: { type: 'number', description: '片段结束秒数，必须大于开始秒数' } }, required: ['start_seconds', 'end_seconds'], additionalProperties: false } } }, required: ['segments'], category: 'media', risk: 'local-write', cost: 4 },
+  { name: 'undo_media_edit', description: '撤销当前视频项目的上一步编辑并打开上一版本，不删除任何版本文件', parameters: {}, category: 'media', risk: 'control', cost: 1 },
+  { name: 'redo_media_edit', description: '重做当前视频项目刚才撤销的编辑并打开下一版本', parameters: {}, category: 'media', risk: 'control', cost: 1 },
   { name: 'find_duplicates', description: '扫描媒体库并按文件内容查找重复文件，不会删除文件', parameters: {}, category: 'media', risk: 'read-only', cost: 4 },
-  { name: 'advanced_document_ocr', description: '用已配置的高级文档解析服务处理当前扫描 PDF；服务不可用时自动回退本机 OCR', parameters: {}, category: 'document', risk: 'local-write', cost: 4 }
+  { name: 'advanced_document_ocr', description: '用已配置的高级文档解析服务处理当前扫描 PDF；服务不可用时自动回退本机 OCR', parameters: {}, category: 'document', risk: 'local-write', cost: 4 },
+  { name: 'ask_across_materials', description: '对当前附件和项目素材进行跨素材证据问答，每个结论返回来源定位', parameters: { question: { type: 'string', description: '要核对的问题' } }, required: ['question'], category: 'project', risk: 'read-only', cost: 3 }
 ]
 
 const BUILTIN_TOOL_MAP = new Map(TOOL_SPECS.map((tool) => [tool.name, Object.freeze(tool)]))
@@ -181,8 +187,38 @@ async function executeAgentTool(name, rawArgs = {}, context = null, handlers = {
       case 'load_subtitle': result = { success: true, action: 'load_subtitle', value: String(args.file_path), desc: '已请求加载字幕' }; break
       case 'batch_transcribe': result = { success: true, action: 'start_batch_transcribe', value: {}, desc: '已交给可恢复的批量转写工作流' }; break
       case 'compress_video': result = { success: true, action: 'start_compress_video', value: { targetMb: Math.max(5, Math.min(500, Number(args.target_mb) || 25)), mode: args.mode === 'remux' ? 'remux' : 'compress' }, desc: '已交给可恢复的视频处理工作流' }; break
+      case 'trim_video': {
+        const startSeconds = Number(args.start_seconds)
+        const endSeconds = Number(args.end_seconds)
+        if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) throw new Error('剪辑结束时间必须大于开始时间')
+        result = { success: true, action: 'start_trim_video', value: { startSeconds, endSeconds }, desc: '已交给可恢复的精确剪辑工作流' }
+        break
+      }
+      case 'remove_video_segment': {
+        const startSeconds = Number(args.start_seconds)
+        const endSeconds = Number(args.end_seconds)
+        if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) throw new Error('删除结束时间必须大于开始时间')
+        result = { success: true, action: 'start_remove_video_segment', value: { startSeconds, endSeconds }, desc: '已交给可恢复的删除片段工作流' }
+        break
+      }
+      case 'concat_video_segments': {
+        const rawSegments = Array.isArray(args.segments) ? args.segments : []
+        if (rawSegments.length < 2) throw new Error('拼接至少需要两个时间段')
+        if (rawSegments.length > 24) throw new Error('单次拼接最多 24 个时间段')
+        const segments = rawSegments.map((segment) => {
+          const startSeconds = Number(segment?.start_seconds)
+          const endSeconds = Number(segment?.end_seconds)
+          if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds) || startSeconds < 0 || endSeconds <= startSeconds) throw new Error('每个拼接片段的结束时间都必须大于开始时间')
+          return { startSeconds, endSeconds }
+        })
+        result = { success: true, action: 'start_concat_video_segments', value: { segments }, desc: '已交给可恢复的多片段拼接工作流' }
+        break
+      }
+      case 'undo_media_edit': result = { success: true, action: 'start_edit_history', value: { direction: 'undo' }, desc: '已交给编辑项目撤销工作流' }; break
+      case 'redo_media_edit': result = { success: true, action: 'start_edit_history', value: { direction: 'redo' }, desc: '已交给编辑项目重做工作流' }; break
       case 'find_duplicates': result = { success: true, action: 'start_duplicate_scan', value: {}, desc: '已交给可恢复的重复文件扫描工作流' }; break
       case 'advanced_document_ocr': result = { success: true, action: 'start_advanced_document_ocr', value: {}, desc: '已交给可恢复的文档处理工作流' }; break
+      case 'ask_across_materials': result = { success: true, action: 'start_cross_material_qa', value: { question: String(args.question || '') }, desc: '已交给可恢复的跨素材证据问答' }; break
     }
     if (!result) return { success: false, error: `工具 ${tool.name} 没有执行器`, verified: false }
     const delegated = String(result.action || '').startsWith('start_')

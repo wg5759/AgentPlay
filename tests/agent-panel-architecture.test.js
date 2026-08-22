@@ -8,8 +8,8 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 test('AgentPanel is a workflow container with bounded size and extracted surfaces', () => {
   const panel = read('src/components/AgentPanel.tsx')
-  assert.ok(panel.split(/\r?\n/).length <= 575, '第五阶段后 AgentPanel 应保持在 575 行以内')
-  for (const moduleName of ['AgentComposer', 'AgentHome', 'RuntimeSettings', 'useVoiceInput', 'useIncomingFiles', 'useLinkMediaTasks', 'useDocumentAnalysisTasks', 'useMediaCreativeTasks']) {
+  assert.ok(panel.split(/\r?\n/).length <= 580, '新任务族接入后 AgentPanel 仍应保持为轻量容器')
+  for (const moduleName of ['AgentComposer', 'AgentHome', 'RuntimeSettings', 'useVoiceInput', 'useIncomingFiles', 'useLinkMediaTasks', 'useDocumentAnalysisTasks', 'useCrossMaterialQaTasks', 'useMediaCreativeTasks', 'useContinueTask']) {
     assert.match(panel, new RegExp(`import ${moduleName} from './agent-panel/${moduleName}'`))
   }
   assert.match(panel, /import \{ createIntentRouter \} from '.\/agent-panel\/intentRouter'/)
@@ -24,6 +24,7 @@ test('intent router owns deterministic priority and graceful detector fallback',
   assert.doesNotMatch(panel, /mediaDownload\.detect|analysis\.detect|libraryIntents/)
   const orderedMarkers = [
     'BATCH_SCOPE_INTENT.test(text)',
+    'await runCrossMaterialQuestion(text)',
     'await runDocumentTask()',
     'isVideoGenerationIntent(text)',
     'window.aiPlayer?.mediaTools',
@@ -50,7 +51,7 @@ test('task command dispatcher owns stored retry, foreground retry and confirmed 
   const dispatcher = read('src/components/agent-panel/taskCommandDispatcher.ts')
   assert.doesNotMatch(panel, /mediaDownload\?\.cancel|analysis\?\.cancel|mediaBatch\?\.cancel|mediaTools\?\.cancel|studio\?\.cancelTask/)
   assert.doesNotMatch(panel, /retry\.kind === 'download'|retryStoredMediaCreative\(retry\)/)
-  for (const kind of ['download', 'link-analysis', 'analysis', 'dedup', 'batch', 'compress', 'video-gen', 'recut', 'doc']) {
+  for (const kind of ['download', 'link-analysis', 'analysis', 'outcome', 'cross-qa', 'dedup', 'batch', 'compress', 'video-gen', 'recut', 'doc']) {
     assert.match(dispatcher, new RegExp(`case '${kind}':`), `${kind} 必须有显式取消或重试路由`)
   }
   assert.match(dispatcher, /if \(!cancelled\) throw new Error\('后台没有确认取消，任务状态保持不变'\)/)

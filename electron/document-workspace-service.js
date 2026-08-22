@@ -17,6 +17,7 @@ const { redactDocument } = require('./redact-service')
 const { bilingualReflow } = require('./bilingual-reflow-service')
 const { recoverTableInto } = require('./table-recovery-service')
 const { FormulaError, analyzeFormula, columnIndex, columnLetters, evaluateFormula } = require('./formula-engine')
+const { fingerprintArtifact } = require('./artifact-fingerprint')
 
 const SUPPORTED_EXTENSIONS = new Set([
   '.txt', '.md', '.csv', '.json', '.srt', '.vtt',
@@ -88,6 +89,34 @@ function cleanFileName(value) {
     .replace(/[. ]+$/g, '')
     .trim()
     .slice(0, 80) || 'AgentPlay文档'
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function sha256Text(value) {
+  return crypto.createHash('sha256').update(String(value || ''), 'utf8').digest('hex')
+}
+
+function buildBundleSourceLedger(plan, sourceText) {
+  const statements = String(sourceText || '')
+    .split(/\n\s*\n|\r?\n/)
+    .map((item) => item.trim())
+    .filter((item) => item && !/^={3,}.*={3,}$/.test(item))
+    .slice(0, 80)
+  if (statements.length === 0) statements.push(String(plan.instruction || '按用户要求创建成果').trim())
+  const ledger = {
+    schemaVersion: 1,
+    kind: 'agentplay.bundle-source-ledger',
+    instruction: String(plan.instruction || ''),
+    facts: statements.map((statement, index) => ({ id: `F${index + 1}`, statement: statement.slice(0, 1200) }))
+  }
+  return { ...ledger, sha256: sha256Text(canonicalJson(ledger)) }
 }
 
 function outputFormatFromInstruction(instruction, fallback = 'docx') {
@@ -563,23 +592,24 @@ function normalizeBundlePlan(raw, formats) {
     if (format === 'docx' || format === 'pdf') {
       bundle.sections[format] = {
         title: cleanFileName(section.title || raw.title || 'AgentPlay文档'),
-        content: String(section.content || '')
+        content: String(section.content || ''),
+        factIds: Array.isArray(section.factIds) ? section.factIds.map(String) : []
       }
     } else if (format === 'xlsx') {
       const sheets = (Array.isArray(section.sheets) ? section.sheets : []).map((sheet) => ({
         name: String(sheet?.name || '结果'),
         rows: Array.isArray(sheet?.rows) ? sheet.rows.slice(0, 5000).map((row) => (Array.isArray(row) ? row.slice(0, 100) : [row])) : []
       })).slice(0, 20)
-      bundle.sections.xlsx = { sheets }
+      bundle.sections.xlsx = { sheets, factIds: Array.isArray(section.factIds) ? section.factIds.map(String) : [] }
     } else if (format === 'pptx') {
       const slides = (Array.isArray(section.slides) ? section.slides : []).map((slide) => ({
         title: String(slide?.title || ''),
         bullets: Array.isArray(slide?.bullets) ? slide.bullets.map(String) : [],
         notes: String(slide?.notes || '')
       })).slice(0, 40)
-      bundle.sections.pptx = { title: String(section.title || raw?.title || ''), slides, content: String(section.content || '') }
+      bundle.sections.pptx = { title: String(section.title || raw?.title || ''), slides, content: String(section.content || ''), factIds: Array.isArray(section.factIds) ? section.factIds.map(String) : [] }
     } else if (format === 'md' || format === 'txt') {
-      bundle.sections[format] = { content: String(typeof section === 'string' ? section : section.content || '') }
+      bundle.sections[format] = { content: String(typeof section === 'string' ? section : section.content || ''), factIds: Array.isArray(section?.factIds) ? section.factIds.map(String) : [] }
     }
   }
   if (Object.keys(bundle.sections).length === 0) throw new Error('模型没有给出任何可用的成套内容')
@@ -1007,22 +1037,23 @@ class DocumentWorkspaceService {
   }
 
   // 单格式生成：每次只让模型产出一种格式，单次调用小、快、失败不拖死其它格式
-  async buildSectionPlan(plan, format, sourceText, options = {}) {
+  async buildSectionPlan(plan, format, sourceText, sourceLedger, options = {}) {
     const schemas = {
-      docx: '{"title":"报告标题","content":"完整正文，使用#标题和-列表"}',
-      pdf: '{"title":"交付文档标题","content":"完整正文，使用#标题和-列表"}',
-      md: '{"content":"Markdown 正文"}',
-      txt: '{"content":"纯文本正文"}',
-      xlsx: '{"sheets":[{"name":"工作表名","rows":[["表头"],["数据"]]}]}',
-      pptx: '{"title":"演示稿标题","slides":[{"title":"页标题","bullets":["要点"],"notes":"备注"}]}'
+      docx: '{"title":"报告标题","content":"完整正文，使用#标题和-列表","factIds":["F1"]}',
+      pdf: '{"title":"交付文档标题","content":"完整正文，使用#标题和-列表","factIds":["F1"]}',
+      md: '{"content":"Markdown 正文","factIds":["F1"]}',
+      txt: '{"content":"纯文本正文","factIds":["F1"]}',
+      xlsx: '{"sheets":[{"name":"工作表名","rows":[["表头"],["数据"]]}],"factIds":["F1"]}',
+      pptx: '{"title":"演示稿标题","slides":[{"title":"页标题","bullets":["要点"],"notes":"备注"}],"factIds":["F1"]}'
     }
     const prompt = [
       `用户要求：${plan.instruction}`,
       `本次只生成 ${format.toUpperCase()} 一种格式的内容，不要输出其它格式。`,
-      sourceText,
+      `以下是本成果包唯一允许使用的冻结事实底稿（SHA-256 ${sourceLedger.sha256}）：`,
+      JSON.stringify(sourceLedger),
       '只返回一个 JSON 对象，不要使用 Markdown 代码块。结构：',
       schemas[format] || schemas.txt,
-      '事实必须来自源文件；资料不足时明确标注，不得编造；PPT每页最多8个要点；Excel公式必须以=开头。'
+      'factIds 必须列出本成果实际使用的底稿事实编号，不得填写底稿不存在的编号。事实只能来自冻结底稿；资料不足时明确标注，不得编造；PPT每页最多8个要点；Excel公式必须以=开头。'
     ].join('\n')
     const response = await this.complete({
       systemPrompt: '你是 AgentPlay 文档规划器。你只生成严格、可执行、符合指定 JSON 结构的文档数据。',
@@ -1032,7 +1063,13 @@ class DocumentWorkspaceService {
       modelConfig: options.modelConfig
     })
     const raw = { title: plan.files[0]?.name || 'AgentPlay文档', [format]: parseJsonObject(response.text) }
-    return normalizeBundlePlan(raw, [format]).sections[format]
+    const section = normalizeBundlePlan(raw, [format]).sections[format]
+    const allowed = new Set(sourceLedger.facts.map((fact) => fact.id))
+    const factIds = [...new Set((section.factIds || []).map(String))]
+    if (factIds.length === 0) throw new Error(`${format.toUpperCase()} 没有声明使用的事实底稿编号`)
+    const unknown = factIds.find((id) => !allowed.has(id))
+    if (unknown) throw new Error(`${format.toUpperCase()} 引用了底稿中不存在的事实编号 ${unknown}`)
+    return { ...section, factIds, sourceLedgerSha256: sourceLedger.sha256 }
   }
 
   async buildBundleSections(plan, options = {}) {
@@ -1041,14 +1078,33 @@ class DocumentWorkspaceService {
       sourceChunks.push(`\n===== ${file.name} =====\n${await extractText(file.path, this.ocr)}`)
     }
     const sourceText = this.truncateAtParagraph(sourceChunks.join('\n'))
+    const sourceLedger = buildBundleSourceLedger(plan, sourceText)
     const sections = {}
     const failures = {}
+    const resumedBundle = options.resumeCheckpoint?.bundle
+    if (resumedBundle?.sourceLedgerSha256 === sourceLedger.sha256 && resumedBundle.sections && typeof resumedBundle.sections === 'object') {
+      const allowedFacts = new Set(sourceLedger.facts.map((fact) => fact.id))
+      for (const format of plan.bundleFormats) {
+        const section = resumedBundle.sections[format]
+        const factIds = Array.isArray(section?.factIds) ? [...new Set(section.factIds.map(String))] : []
+        if (!section || factIds.length === 0 || factIds.some((id) => !allowedFacts.has(id)) || section.sourceLedgerSha256 !== sourceLedger.sha256) continue
+        sections[format] = JSON.parse(JSON.stringify({ ...section, factIds }))
+      }
+    }
     const total = plan.bundleFormats.length
     for (let index = 0; index < plan.bundleFormats.length; index++) {
       const format = plan.bundleFormats[index]
+      if (sections[format]) {
+        options.onStatus?.(`已从检查点恢复 ${format.toUpperCase()}（${index + 1}/${total}）`)
+        continue
+      }
       options.onStatus?.(`正在生成 ${format.toUpperCase()}（${index + 1}/${total}）`)
       try {
-        sections[format] = await this.buildSectionPlan(plan, format, sourceText, options)
+        sections[format] = await this.buildSectionPlan(plan, format, sourceText, sourceLedger, options)
+        options.onCheckpoint?.({
+          stage: 'bundle-section-complete',
+          bundle: { sourceLedgerSha256: sourceLedger.sha256, sections: JSON.parse(JSON.stringify(sections)) }
+        })
       } catch (error) {
         if (options.signal?.aborted) throw error
         failures[format] = error instanceof Error ? error.message : String(error)
@@ -1057,7 +1113,7 @@ class DocumentWorkspaceService {
     if (!Object.keys(sections).length) {
       throw new Error(`全部格式生成失败：${Object.values(failures)[0] || '未知原因'}`)
     }
-    return { sections, failures }
+    return { sections, failures, sourceLedger }
   }
 
   async buildFormulaPlan(plan, options = {}) {
@@ -1082,7 +1138,7 @@ class DocumentWorkspaceService {
       content: plan.files.length ? await extractText(plan.files[0].path, this.ocr) : plan.instruction,
       slides: [], sheets: []
     }
-    const outputDir = plan.files[0] ? path.dirname(plan.files[0].path) : this.outputRoot
+    const outputDir = plan.outputDir ? path.resolve(plan.outputDir) : plan.files[0] ? path.dirname(plan.files[0].path) : this.outputRoot
     const sourceBase = path.parse(plan.files[0]?.name || result.title).name
     const baseName = `${cleanFileName(sourceBase)}-AgentPlay处理版`
     const finalPath = uniqueOutputPath(outputDir, baseName, result.outputFormat)
@@ -1107,6 +1163,7 @@ class DocumentWorkspaceService {
     const baseName = cleanFileName(path.parse(plan.files[0]?.name || 'AgentPlay成套文档').name)
     const labels = { docx: '报告', xlsx: '分析', pptx: '汇报', pdf: '交付', md: '文档', txt: '文本' }
     const outputs = []
+    const bindings = []
     for (const [format, section] of Object.entries(bundle.sections)) {
       const finalPath = uniqueOutputPath(outputDir, `${baseName}-AgentPlay处理版-${labels[format] || format}`, format)
       if (format === 'docx') await writeDocx(finalPath, section.title, section.content)
@@ -1117,10 +1174,79 @@ class DocumentWorkspaceService {
         await this.renderPdf(htmlForPdf(section.title, section.content), finalPath)
       } else commitBuffer(finalPath, Buffer.from(section.content || '', 'utf8'))
       outputs.push(finalPath)
+      bindings.push({ path: finalPath, format, factIds: section.factIds || [], sourceLedgerSha256: section.sourceLedgerSha256 || bundle.sourceLedger?.sha256 || '' })
     }
     const failureNotes = Object.entries(bundle.failures || {})
     const summary = `已生成 ${outputs.length} 个文件${failureNotes.length ? `；${failureNotes.map(([format, reason]) => `${format.toUpperCase()} 失败（${reason}）`).join('；')}，可重试` : ''}`
-    return { outputs, summary, failures: bundle.failures }
+    return {
+      outputs,
+      summary,
+      failures: bundle.failures,
+      bundle: {
+        sourceLedger: bundle.sourceLedger,
+        requestedFormats: [...plan.bundleFormats],
+        bindings
+      }
+    }
+  }
+
+  createDeliveryReceipt(plan, result) {
+    const sources = plan.files.map((file) => {
+      const stat = fs.statSync(file.path)
+      return { path: file.path, name: file.name, bytes: stat.size, sha256: fingerprintArtifact(file.path).sha256 }
+    })
+    const bindingByPath = new Map((result.bundle?.bindings || []).map((item) => [path.resolve(item.path), item]))
+    const artifacts = (result.outputs || []).map((outputPath) => {
+      const resolved = path.resolve(outputPath)
+      const fingerprint = fingerprintArtifact(resolved)
+      const binding = bindingByPath.get(resolved)
+      return {
+        path: resolved,
+        name: path.basename(resolved),
+        kind: fingerprint.kind,
+        format: String(binding?.format || (fingerprint.kind === 'directory' ? 'directory' : path.extname(resolved).slice(1))).toLowerCase(),
+        bytes: fingerprint.bytes,
+        sha256: fingerprint.sha256,
+        ...(Number.isFinite(fingerprint.fileCount) ? { fileCount: fingerprint.fileCount } : {}),
+        ...(binding ? { factIds: [...binding.factIds], sourceLedgerSha256: binding.sourceLedgerSha256 } : {})
+      }
+    })
+    let bundle
+    if (plan.kind === 'ai-bundle') {
+      const requestedFormats = [...plan.bundleFormats]
+      const completedFormats = artifacts.map((item) => item.format)
+      const failures = { ...(result.failures || {}) }
+      const sourceLedgerSha256 = String(result.bundle?.sourceLedger?.sha256 || '')
+      const bindingsValid = artifacts.length > 0 && artifacts.every((artifact) => (
+        artifact.sourceLedgerSha256 === sourceLedgerSha256
+        && Array.isArray(artifact.factIds)
+        && artifact.factIds.length > 0
+      ))
+      const complete = requestedFormats.every((format) => completedFormats.includes(format))
+        && Object.keys(failures).length === 0
+        && bindingsValid
+      bundle = {
+        requestedFormats,
+        completedFormats,
+        failedFormats: failures,
+        sourceLedgerSha256,
+        sourceLedger: result.bundle?.sourceLedger || null,
+        consistency: {
+          verdict: complete ? 'matched' : 'partial',
+          sharedSourceLedger: bindingsValid
+        }
+      }
+    }
+    return {
+      schemaVersion: 1,
+      kind: 'agentplay.delivery-receipt',
+      createdAt: new Date().toISOString(),
+      status: bundle && bundle.consistency.verdict !== 'matched' ? 'partial' : 'complete',
+      instructionSha256: sha256Text(plan.instruction),
+      sources,
+      artifacts,
+      ...(bundle ? { bundle } : {})
+    }
   }
 
   recordHistory(plan, result) {
@@ -1128,7 +1254,8 @@ class DocumentWorkspaceService {
     const record = {
       id: crypto.randomUUID(), createdAt: new Date().toISOString(), instruction: plan.instruction,
       kind: plan.kind, sources: plan.files.map((file) => file.path), outputs: result.outputs,
-      summary: result.summary
+      summary: result.summary,
+      deliveryReceipt: result.deliveryReceipt
     }
     fs.appendFileSync(path.join(this.historyRoot, 'history.jsonl'), `${JSON.stringify(record)}\n`, 'utf8')
     return record.id
@@ -1259,8 +1386,17 @@ class DocumentWorkspaceService {
       const bundle = await this.buildBundleSections(plan, options)
       result = await this.writeBundle(plan, bundle)
     } else {
-      result = await this.writeGenerated(plan, plan.requiresAi ? await this.buildAiPlan(plan, options) : null)
+      let aiPlan = null
+      if (plan.requiresAi) {
+        const resumedPlan = options.resumeCheckpoint?.aiPlan
+        aiPlan = resumedPlan && typeof resumedPlan === 'object'
+          ? JSON.parse(JSON.stringify(resumedPlan))
+          : await this.buildAiPlan(plan, options)
+        if (!resumedPlan) options.onCheckpoint?.({ stage: 'ai-plan-ready', aiPlan })
+      }
+      result = await this.writeGenerated(plan, aiPlan)
     }
+    result.deliveryReceipt = this.createDeliveryReceipt(plan, result)
     options.onCheckpoint?.({ stage: 'outputs-written', result })
     const historyId = this.recordHistory(plan, result)
     options.onCheckpoint?.({ stage: 'history-written', result: { ...result, historyId } })
@@ -1276,6 +1412,7 @@ module.exports = {
   htmlForPdf,
   normalizeAiPlan,
   normalizeBundlePlan,
+  buildBundleSourceLedger,
   parseExcelEnrichIntent,
   parseExplicitFormula,
   pdfPageCount,

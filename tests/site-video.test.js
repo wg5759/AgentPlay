@@ -5,7 +5,7 @@ const path = require('node:path')
 const test = require('node:test')
 const { agentPanelSource } = require('./helpers/agent-panel-source')
 
-const { SiteVideoService, parseProgressLine, sanitizeTitle, cookiesFileForUrl, detectCookiesDomain, normalizeCookiesText, stripHashFromName, extractorArgsForUrl } = require('../electron/site-video-service')
+const { SiteVideoService, parseProgressLine, sanitizeTitle, cookiesFileForUrl, detectCookiesDomain, normalizeCookiesText, stripHashFromName, extractorArgsForUrl, weixinChannelsGuidance } = require('../electron/site-video-service')
 const YTDLP_PACK = require('../electron/ytdlp-pack-manifest')
 
 function fakeSpawn(responder) {
@@ -59,6 +59,28 @@ test('resolve parses yt-dlp json output and rejects non-video pages', async () =
     })
   })
   await assert.rejects(bad.resolve('https://example.com/news'), /没有解析到视频信息/)
+})
+
+test('weixin channels links fail fast with actionable guidance instead of raw Unsupported URL', async () => {
+  const service = new SiteVideoService({
+    enginePath: process.execPath,
+    spawnImpl: fakeSpawn(({ child }) => {
+      child.emit('exit', 1)
+      child.stderr.emit('data', Buffer.from('ERROR: Unsupported URL'))
+    })
+  })
+  await assert.rejects(service.resolve('https://weixin.qq.com/sph/ArqAAGNNJQ'), (error) => {
+    assert.match(error.message, /微信视频号链接/)
+    assert.match(error.message, /yt-dlp 不支持/)
+    assert.match(error.message, /视频号助手/)
+    assert.match(error.message, /v\.qq\.com/)
+    assert.doesNotMatch(error.message, /Unsupported URL/)
+    return true
+  })
+  await assert.rejects(service.download('https://channels.weixin.qq.com/finder-preview/pages/sph?id=ArqAAGNNJQ', { destDir: os.tmpdir() }), /微信视频号链接/)
+  // 非视频号链接不受影响：腾讯视频走正常 yt-dlp 路径
+  assert.equal(weixinChannelsGuidance('https://v.qq.com/x/page/abc.html'), '')
+  assert.match(weixinChannelsGuidance('https://weixin.qq.com/sph/abc'), /视频号/)
 })
 
 test('download returns produced file and surfaces yt-dlp failures honestly', async () => {

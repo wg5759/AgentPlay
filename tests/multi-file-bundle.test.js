@@ -39,10 +39,10 @@ test('联合任务端到端：每种格式一次模型调用，产出成套文�
     const sourcePath = path.join(tempDir, '销售资料.txt')
     fs.writeFileSync(sourcePath, '1月收入100，成本80；2月收入200，成本150。')
     const perFormat = {
-      docx: { title: '销售报告', content: '# 销售概况\n- 1月毛利20\n- 2月毛利50' },
-      xlsx: { sheets: [{ name: '月度数据', rows: [['月份', '收入', '成本'], ['1月', 100, 80], ['2月', 200, 150]] }] },
-      pptx: { title: '销售概览', slides: [{ title: '销售概览', bullets: ['总收入300', '总毛利70'], notes: '开场白' }] },
-      pdf: { title: '销售交付版', content: '交付正文' }
+      docx: { title: '销售报告', content: '# 销售概况\n- 1月毛利20\n- 2月毛利50', factIds: ['F1'] },
+      xlsx: { sheets: [{ name: '月度数据', rows: [['月份', '收入', '成本'], ['1月', 100, 80], ['2月', 200, 150]] }], factIds: ['F1'] },
+      pptx: { title: '销售概览', slides: [{ title: '销售概览', bullets: ['总收入300', '总毛利70'], notes: '开场白' }], factIds: ['F1'] },
+      pdf: { title: '销售交付版', content: '交付正文', factIds: ['F1'] }
     }
     const calls = []
     const service = new DocumentWorkspaceService({
@@ -87,14 +87,9 @@ test('无源文件也能按指令成套生成', async () => {
     const service = new DocumentWorkspaceService({
       outputRoot: path.join(tempDir, 'outputs'),
       historyRoot: path.join(tempDir, 'history'),
-      complete: async () => ({
-        text: JSON.stringify({
-          title: '周报成套',
-          summary: '完成',
-          docx: { title: '周报', content: '# 本周进展' },
-          md: { content: '# 周报 md' }
-        })
-      }),
+      complete: async ({ prompt }) => ({ text: JSON.stringify(prompt.includes('DOCX')
+        ? { title: '周报', content: '# 本周进展', factIds: ['F1'] }
+        : { content: '# 周报 md', factIds: ['F1'] }) }),
       renderPdf: async () => { throw new Error('不应渲染 PDF') }
     })
     const result = await service.run([], '生成本周工作周报，要 Word 和 Markdown 两份', 'auto')

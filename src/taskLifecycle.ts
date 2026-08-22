@@ -67,7 +67,7 @@ export interface WorkspaceTaskFailure {
 }
 
 export interface WorkspaceTaskRetry {
-  kind: 'doc' | 'analysis' | 'download' | 'link-analysis' | 'compress' | 'video-gen' | 'batch' | 'dedup' | 'recut'
+  kind: 'doc' | 'analysis' | 'outcome' | 'cross-qa' | 'download' | 'link-analysis' | 'compress' | 'trim' | 'video-gen' | 'batch' | 'dedup' | 'recut'
   instruction?: string
   url?: string
   sourcePath?: string
@@ -300,7 +300,9 @@ export function restoreWorkspaceTasks(rawTasks: unknown, now = Date.now()): Work
 }
 
 export function progressFromStatus(status: string): number | null {
-  const match = /（(\d+)\/(\d+)）/.exec(String(status || ''))
-  if (!match || Number(match[2]) <= 0) return null
-  return Math.round((Number(match[1]) / Number(match[2])) * 100)
+  const text = String(status || '')
+  const fraction = /（(\d+)\/(\d+)）/.exec(text)
+  if (fraction && Number(fraction[2]) > 0) return Math.max(0, Math.min(100, Math.round((Number(fraction[1]) / Number(fraction[2])) * 100)))
+  const percent = /(\d+(?:\.\d+)?)\s*%/.exec(text)
+  return percent ? Math.max(0, Math.min(100, Math.round(Number(percent[1])))) : null
 }

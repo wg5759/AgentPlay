@@ -6,6 +6,7 @@ const path = require('path')
 const fs = require('fs')
 const os = require('os')
 const crypto = require('crypto')
+const ExcelJS = require('exceljs')
 const { execFileSync, spawn } = require('child_process')
 const { MpvService } = require('./mpv-service')
 const { requestScreenGuide, askAboutImage } = require('./screen-guide-service')
@@ -67,6 +68,18 @@ const { LocalAiDownloadService } = require('./local-ai-download-service')
 const { PersistentTaskRuntime } = require('./persistent-task-runtime')
 const { snapshotDocumentSources, validateDocumentSources, outputsStillExist } = require('./persistent-document-task')
 const { evaluateTaskResult, classifyTaskFailure } = require('./task-result-quality')
+const { compileOutcomeWorkflow, assertOutcomeWorkflow } = require('./outcome-workflow')
+const { OutcomeWorkflowRunner } = require('./outcome-workflow-runner')
+const { ProjectCapsuleStore } = require('./project-capsule-store')
+const { PublicLinkService } = require('./public-link-service')
+const { videoTime, documentPage, sheetCell, imageRegion } = require('./evidence-reference')
+const { CrossMaterialQaService, detectCrossMaterialQuestion } = require('./cross-material-qa-service')
+const { imageSize } = require('./docx-image')
+const { compileBurnSubtitlesDecisionList, compileConcatSourcesDecisionList, compileCueEditDecisionList, compileEditDecisionList, compileEditHistoryAction, compileMuxSubtitlesDecisionList, compileMusicDecisionList, compileShiftSubtitlesDecisionList, compileTranslateSubtitlesDecisionList } = require('./media-edit-decision')
+const { MediaEditConversation } = require('./media-edit-conversation')
+const { assertEditDecisionList, attachEditDecisionList } = require('./edit-decision-list')
+const { MediaEditService, decodeSubtitleText, parseSrtCues } = require('./media-edit-service')
+const { MediaEditProjectStore } = require('./media-edit-project-store')
 const LOCAL_AI_PACK = require('./local-ai-pack-manifest')
 
 process.on('uncaughtException', (error) => log.error('主进程未捕获异常', error))
@@ -634,6 +647,11 @@ const videoFrames = new VideoFrameService({
   ffmpegPath: path.join(app.getPath('userData'), 'yt-dlp', 'ffmpeg-8.0.1-essentials_build', 'bin', 'ffmpeg.exe'),
   ffprobePath: path.join(app.getPath('userData'), 'yt-dlp', 'ffmpeg-8.0.1-essentials_build', 'bin', 'ffprobe.exe')
 })
+const mediaEditService = new MediaEditService({ frames: videoFrames })
+const mediaEditProjects = new MediaEditProjectStore({ rootDir: path.join(app.getPath('userData'), 'media-edit-projects') })
+const projectCapsules = new ProjectCapsuleStore({ rootDir: path.join(app.getPath('userData'), 'project-capsules') })
+const publicLinkService = new PublicLinkService()
+const mediaEditConversation = new MediaEditConversation()
 const translateDownload = new LocalAiDownloadService({
   installRoot: path.join(app.getPath('userData'), 'translate-pack'),
   manifest: TRANSLATE_PACK,
@@ -1104,6 +1122,12 @@ app.whenReady().then(async () => {
     if (task.type === 'analysis.run') {
       mainWindow.webContents.send('analysis:status', { requestId: task.id, status: task.status || '' })
     }
+    if (task.type === 'outcome.workflow') {
+      mainWindow.webContents.send('outcome:status', { requestId: task.id, status: task.status || '' })
+    }
+    if (task.type === 'project.evidence-qa') {
+      mainWindow.webContents.send('cross-material:status', { requestId: task.id, status: task.status || '' })
+    }
     if (task.type === 'subtitle.generate') {
       mainWindow.webContents.send('subtitle:bilingual-status', { requestId: task.id, status: task.status || '' })
     }
@@ -1140,6 +1164,13 @@ app.whenReady().then(async () => {
       const actualOutput = actualValue ? path.resolve(actualValue) : ''
       if (frozenOutput && actualOutput === frozenOutput && fs.existsSync(frozenOutput) && fs.statSync(frozenOutput).isFile()) fs.rmSync(frozenOutput, { force: true })
       action = '清理不合格的任务自产物并重新压缩'
+    } else if (type === 'media.edit-trim' || type === 'media.edit-remove' || type === 'media.edit-concat' || type === 'media.edit-music' || type === 'media.edit-concat-sources' || type === 'media.edit-burn-subtitles' || type === 'media.edit-mux-subtitles' || type === 'media.shift-subtitles' || type === 'media.translate-subtitles' || type === 'media.edit-subtitle-cues') {
+      const frozenValue = String(task.spec?.outputPath || '')
+      const actualValue = String(result?.outputPath || result?.outputs?.[0] || '')
+      const frozenOutput = frozenValue ? path.resolve(frozenValue) : ''
+      const actualOutput = actualValue ? path.resolve(actualValue) : ''
+      if (frozenOutput && actualOutput === frozenOutput && fs.existsSync(frozenOutput) && fs.statSync(frozenOutput).isFile()) fs.rmSync(frozenOutput, { force: true })
+      action = '清理不合格的剪辑产物并从冻结时间线重新执行'
     } else if (type === 'media.dedup') {
       action = '保留哈希缓存并重新汇总扫描结果'
     } else if (type.startsWith('download.')) {
@@ -1196,6 +1227,119 @@ app.whenReady().then(async () => {
     if (requiresKey && !config.apiKey) throw new Error('任务原先使用的模型凭证已不可用，请重新配置')
     return config
   }
+  const textEvidence = (source, text) => {
+    const value = String(text || '').trim()
+    if (!value) return []
+    const sections = value.split(/(?=^## 第 \d+ 页\s*$)/m).filter((item) => item.trim())
+    const evidence = []
+    for (const section of sections) {
+      const page = Math.max(1, Number(section.match(/^## 第 (\d+) 页/m)?.[1]) || 1)
+      const body = section.replace(/^## 第 \d+ 页\s*/m, '').trim()
+      const paragraphs = body.split(/\n\s*\n|(?<=[。！？.!?])\s+(?=[^。！？.!?])/).map((item) => item.replace(/\s+/g, ' ').trim()).filter(Boolean)
+      for (const paragraph of paragraphs) {
+        for (let offset = 0; offset < paragraph.length; offset += 480) {
+          evidence.push(documentPage(source, page, paragraph.slice(offset, offset + 480)))
+          if (evidence.length >= 80) return evidence
+        }
+      }
+    }
+    return evidence
+  }
+  const inspectEvidencePath = async (filePath) => {
+    const resolved = path.resolve(String(filePath || ''))
+    const ext = path.extname(resolved).toLowerCase()
+    if (ext === '.xlsx') {
+      const workbook = new ExcelJS.Workbook(); await workbook.xlsx.readFile(resolved); const evidence = []
+      workbook.eachSheet((sheet) => sheet.eachRow({ includeEmpty: false }, (row) => row.eachCell({ includeEmpty: false }, (cell) => {
+        if (evidence.length < 120 && String(cell.text || '').trim()) evidence.push(sheetCell(resolved, sheet.name, cell.address, cell.text))
+      })))
+      return evidence
+    }
+    if (['.jpg', '.jpeg', '.png', '.bmp'].includes(ext)) {
+      const size = imageSize(fs.readFileSync(resolved), ext)
+      let excerpt = ''
+      try {
+        const useRapid = rapidOcr.availability().available
+        const status = useRapid ? { available: true } : await ocrService.detect()
+        if (status.available) {
+          const results = useRapid ? await rapidOcr.recognize([resolved]) : await ocrService.recognize([resolved])
+          const entry = results.get(resolved)
+          if (entry?.ok) excerpt = String(entry.text || '').replace(/\s+/g, ' ').trim()
+        }
+      } catch { /* 图片无OCR时仍可引用完整区域和尺寸 */ }
+      return [imageRegion(resolved, { x: 0, y: 0, width: size.width, height: size.height }, excerpt || `${size.width}×${size.height}`)]
+    }
+    if (getType(ext) === 'video') {
+      const subtitlePath = findAdjacentSubtitle(resolved)
+      const cues = subtitlePath ? parseSubtitleCues(decodeSubtitleText(fs.readFileSync(subtitlePath)), path.extname(subtitlePath)) : []
+      return cues.slice(0, 120).map((cue) => videoTime(resolved, cue.start, cue.end, cue.text))
+    }
+    try {
+      const content = await extractText(resolved, { recognizePdf: recognizePdfWithOcr })
+      return textEvidence(resolved, content)
+    } catch {
+      return []
+    }
+  }
+  const resolveCrossMaterialContext = (paths) => {
+    const seedPaths = [...new Set((Array.isArray(paths) ? paths : []).map((item) => path.resolve(String(item || ''))).filter((item) => fs.existsSync(item) && !SENSITIVE_FILE.test(item)))]
+    const projectId = projectCapsules.resolveProjectId(seedPaths)
+    const project = projectId ? projectCapsules.get(projectId) : null
+    const projectPaths = project ? [
+      ...project.materials.flatMap((item) => item.locations || []),
+      ...project.artifacts.map((item) => item.path)
+    ] : []
+    const sourcePaths = [...new Set([...seedPaths, ...projectPaths].map((item) => path.resolve(String(item || ''))).filter((item) => fs.existsSync(item) && fs.statSync(item).isFile() && !SENSITIVE_FILE.test(item)))].slice(0, 20)
+    const referenceEvidence = (project?.revisions || []).flatMap((revision) => [
+      ...(Array.isArray(revision?.result?.preview?.evidence) ? revision.result.preview.evidence : []),
+      ...(Array.isArray(revision?.result?.evidence) ? revision.result.evidence : [])
+    ]).slice(-100)
+    return { projectId: projectId || projectCapsules.newProjectId(), project, sourcePaths, referenceEvidence }
+  }
+  const preparePersistentCrossMaterialTask = (paths, input) => {
+    const context = resolveCrossMaterialContext(paths)
+    const sourceCount = new Set([...context.sourcePaths, ...context.referenceEvidence.map((item) => String(item?.source || '')).filter(Boolean)]).size
+    if (sourceCount < 2) throw new Error('跨素材问答至少需要两个来源；请再添加一份文件或进入已有混合项目')
+    const planned = selectModelForTaskPlan({ taskKind: 'cross-material-qa', requirements: { text: true } })
+    const config = planned.selected || modelConfigStore.resolved('chat')
+    const requiresKey = config?.requiresKey !== false
+    if (!config?.baseUrl || !config?.model || (requiresKey && !config.apiKey)) throw new Error('跨素材问答需要可用模型，请先在模型接入中心完成连接')
+    const modelRoute = freezeTaskModelRoute(config, { taskKind: 'cross-material-qa' })
+    const sources = snapshotDocumentSources(context.sourcePaths)
+    const question = String(input.question || '').trim().slice(0, 2000)
+    const operationKey = crypto.createHash('sha256').update(JSON.stringify({ type: 'project.evidence-qa', question, sources: sources.map((item) => item.sha256), references: context.referenceEvidence })).digest('hex')
+    return {
+      matched: detectCrossMaterialQuestion(question),
+      spec: { question, sources, referenceEvidence: context.referenceEvidence, projectId: context.projectId, operationKey, modelRoute },
+      approval: modelRoute.local ? null : { action: 'cloud', summary: `把 ${sourceCount} 份素材的本地提取片段和定位发送给 ${modelRoute.providerName} · ${modelRoute.model}；不上传原文件` }
+    }
+  }
+  persistentTaskRuntime.register('project.evidence-qa', async ({ task, signal, checkpoint, status }) => {
+    const paths = validateDocumentSources(task.spec.sources)
+    for (const sourcePath of paths) userAuthorizedPaths.add(sourcePath)
+    if (task.checkpoint?.stage === 'answer-ready' && task.checkpoint?.result) {
+      const projectCapsule = projectCapsules.recordTask({ projectId: task.spec.projectId, taskId: task.id, type: task.type, instruction: task.spec.question, sources: task.spec.sources, references: (task.spec.referenceEvidence || []).map((item) => ({ kind: item.evidenceKind, uri: item.source })), outputs: [], operationKey: task.spec.operationKey, result: task.checkpoint.result })
+      return { ...task.checkpoint.result, projectCapsule }
+    }
+    status('正在读取并定位多份素材')
+    let references = Array.isArray(task.checkpoint?.references) ? task.checkpoint.references : null
+    if (!references) {
+      const groups = []
+      for (const sourcePath of paths) {
+        if (signal.aborted) throw new DOMException('跨素材问答已停止', 'AbortError')
+        groups.push(...await inspectEvidencePath(sourcePath))
+      }
+      references = [...groups, ...(task.spec.referenceEvidence || [])].slice(0, 200)
+      checkpoint({ stage: 'evidence-collected', references })
+    }
+    status('正在逐条核对结论与来源')
+    const config = resolveTaskModelRoute(task.spec.modelRoute)
+    const service = new CrossMaterialQaService({ complete: (call) => llmComplete({ ...call, modelConfig: config, taskKind: 'cross-material-qa' }) })
+    const result = await service.answer({ question: task.spec.question, references, signal, modelConfig: config, allowRepair: isLocalModelConfig(config) })
+    checkpoint({ stage: 'answer-ready', result })
+    const projectCapsule = projectCapsules.recordTask({ projectId: task.spec.projectId, taskId: task.id, type: task.type, instruction: task.spec.question, sources: task.spec.sources, references: (task.spec.referenceEvidence || []).map((item) => ({ kind: item.evidenceKind, uri: item.source })), outputs: [], operationKey: task.spec.operationKey, result })
+    return { ...result, projectCapsule }
+  }, { autoResume: true })
   const preparePersistentDocumentTask = async (paths, input) => {
     const plan = documentWorkspace.plan(paths, input.instruction, input.outputFormat)
     let modelRoute = null
@@ -1245,11 +1389,16 @@ app.whenReady().then(async () => {
         maxOutputTokens: maxOutputTokensForConfig(config)
       }
     }
+    const sources = snapshotDocumentSources(paths)
+    const projectId = projectCapsules.resolveProjectId(paths) || projectCapsules.newProjectId()
+    const operationKey = crypto.createHash('sha256').update(JSON.stringify({ type: 'document.run', instruction: String(input.instruction || ''), outputFormat: String(input.outputFormat || 'auto'), sources: sources.map((item) => item.sha256) })).digest('hex')
     return {
       spec: {
-        sources: snapshotDocumentSources(paths),
+        sources,
         instruction: String(input.instruction || ''),
         outputFormat: String(input.outputFormat || 'auto'),
+        projectId,
+        operationKey,
         modelRoute,
         ocrRemote,
         ocrRoute
@@ -1262,13 +1411,20 @@ app.whenReady().then(async () => {
     }
   }
   persistentTaskRuntime.register('document.run', async ({ task, signal, checkpoint, status }) => {
-    if (task.checkpoint?.stage === 'history-written' && task.checkpoint?.result && outputsStillExist(task.checkpoint.result)) return task.checkpoint.result
+    if (task.checkpoint?.stage === 'history-written' && task.checkpoint?.result && outputsStillExist(task.checkpoint.result)) {
+      const checkpointResult = task.checkpoint.result
+      const projectCapsule = checkpointResult.projectCapsule || projectCapsules.recordTask({ projectId: task.spec.projectId, taskId: task.id, type: task.type, instruction: task.spec.instruction, sources: task.spec.sources, outputs: checkpointResult.outputs || [], historyId: checkpointResult.historyId, operationKey: task.spec.operationKey, result: checkpointResult })
+      return { ...checkpointResult, projectCapsule }
+    }
+    const reusable = projectCapsules.findReusable(task.spec.projectId, task.spec.operationKey)
+    if (reusable) return reusable
     const paths = validateDocumentSources(task.spec.sources)
     for (const sourcePath of paths) userAuthorizedPaths.add(sourcePath)
     let documentOptions = {
       signal,
       onStatus: status,
       onCheckpoint: checkpoint,
+      resumeCheckpoint: task.checkpoint,
       cloudApproved: task.spec.ocrRemote === true
     }
     if (task.spec.ocrRoute) {
@@ -1294,8 +1450,9 @@ app.whenReady().then(async () => {
     status(plan.requiresAi ? '正在理解要求和生成内容' : '正在执行本地文档操作')
     const result = await documentWorkspace.run(paths, task.spec.instruction, task.spec.outputFormat, documentOptions)
     for (const outputPath of result.outputs || []) userAuthorizedPaths.add(path.resolve(outputPath))
+    const projectCapsule = projectCapsules.recordTask({ projectId: task.spec.projectId, taskId: task.id, type: task.type, instruction: task.spec.instruction, sources: task.spec.sources, outputs: result.outputs || [], historyId: result.historyId, operationKey: task.spec.operationKey, result })
     status('正在验证并保存结果')
-    return result
+    return { ...result, projectCapsule }
   }, { autoResume: true })
   const preparePersistentAnalysisTask = (input) => {
     const resolvedSource = assertAllowedPath(input.sourcePath)
@@ -1336,6 +1493,7 @@ app.whenReady().then(async () => {
       signal,
       onStatus: status,
       onCheckpoint: checkpoint,
+      resumeCheckpoint: task.checkpoint,
       workspace: documentWorkspace,
       complete: (input) => llmComplete({ ...input, modelConfig: config, taskKind: 'analysis' }),
       completeVisionMulti: (input) => llmCompleteVisionMulti({ ...input, modelConfig: config, taskKind: 'analysis-vision' }),
@@ -1349,6 +1507,91 @@ app.whenReady().then(async () => {
       }
     })
     for (const outputPath of result.outputs || []) userAuthorizedPaths.add(path.resolve(outputPath))
+    return result
+  }, { autoResume: true })
+  const preparePersistentOutcomeTask = (input) => {
+    const sourcePath = assertAllowedPath(input.sourcePath)
+    const workflow = compileOutcomeWorkflow({ sourcePath, instruction: input.instruction })
+    if (!workflow) throw new Error('当前要求不是可执行的多成果视频工作流；请至少明确两个最终格式')
+    const visionDecision = selectModelForTaskPlan({ taskKind: 'analysis-vision', requirements: { vision: true } })
+    const textDecision = visionDecision.selected ? null : selectModelForTaskPlan({ taskKind: 'analysis', requirements: { text: true } })
+    const config = visionDecision.selected || textDecision?.selected || modelConfigStore.resolved('chat')
+    const requiresKey = config?.requiresKey !== false
+    if (config?.configured === false || !config?.baseUrl || !config?.model || (requiresKey && !config.apiKey)) {
+      throw new Error('这个成果工作流需要模型理解视频并生成多格式内容，请先在模型接入中心配置模型')
+    }
+    const modelRoute = freezeTaskModelRoute(config, { taskKind: visionDecision.selected ? 'analysis-vision' : 'analysis' })
+    const sources = snapshotDocumentSources([sourcePath])
+    const projectId = projectCapsules.resolveProjectId([sourcePath]) || projectCapsules.newProjectId()
+    const operationKey = crypto.createHash('sha256').update(JSON.stringify({ type: 'outcome.workflow', workflow, sources: sources.map((item) => item.sha256) })).digest('hex')
+    return {
+      spec: {
+        sources,
+        workflow,
+        mediaName: String(input.mediaName || path.basename(sourcePath)),
+        duration: Number(input.duration) || 0,
+        modelRoute,
+        projectId,
+        operationKey
+      },
+      approval: modelRoute.local ? null : {
+        action: 'cloud',
+        summary: `把视频关键画面、字幕证据和成果底稿发送给 ${modelRoute.providerName} · ${modelRoute.model}，生成 ${workflow.deliverables.formats.map((item) => item.toUpperCase()).join('、')}`
+      }
+    }
+  }
+  const outcomeWorkflowRunner = new OutcomeWorkflowRunner({ outputsStillExist })
+  persistentTaskRuntime.register('outcome.workflow', async ({ task, signal, checkpoint, status }) => {
+    const reusable = projectCapsules.findReusable(task.spec.projectId, task.spec.operationKey)
+    if (reusable) return reusable
+    const [sourcePath] = validateDocumentSources(task.spec.sources)
+    userAuthorizedPaths.add(sourcePath)
+    const workflow = assertOutcomeWorkflow(task.spec.workflow)
+    if (path.resolve(workflow.source.path) !== path.resolve(sourcePath)) throw new Error('成果工作流来源与冻结素材不一致')
+    const config = resolveTaskModelRoute(task.spec.modelRoute)
+    const workflowRoot = path.join(app.getPath('documents'), 'AgentPlay 输出', `视频成果包-${task.id}`)
+    fs.mkdirSync(workflowRoot, { recursive: true })
+
+    const formatNames = { docx: 'Word 报告', pptx: 'PPT 汇报', xlsx: 'Excel 分析表', pdf: 'PDF 交付版', md: 'Markdown 文档' }
+    const bundleInstruction = `严格依据这份视频解剖底稿，生成一套相互一致的中文成果：${workflow.deliverables.formats.map((format) => formatNames[format] || format.toUpperCase()).join(' + ')}。不得补写底稿没有的事实。`
+    const result = await outcomeWorkflowRunner.run({
+      workflow,
+      sourceReceipt: task.spec.sources[0],
+      checkpoint: task.checkpoint,
+      status,
+      saveCheckpoint: checkpoint,
+      runAnalysis: ({ resumeCheckpoint, onCheckpoint }) => runChatAnalysis({
+        sourcePath, mediaName: task.spec.mediaName, duration: task.spec.duration,
+        instruction: workflow.instruction, outputFormat: 'md', outputDir: workflowRoot,
+        cloudApproved: !isLocalModelConfig(config), signal,
+        onStatus: (value) => status(`（1/2）${value}`), onCheckpoint, resumeCheckpoint,
+        workspace: documentWorkspace,
+        complete: (call) => llmComplete({ ...call, modelConfig: config, taskKind: 'analysis' }),
+        completeVisionMulti: (call) => llmCompleteVisionMulti({ ...call, modelConfig: config, taskKind: 'analysis-vision' }),
+        frames: videoFrames, translateToChinese: translateAnalysisCuesToChinese,
+        model: { configured: true, local: isLocalModelConfig(config), provider: config.providerName || config.providerId || '', model: config.model }
+      }),
+      runPackage: async ({ analysisResult, resumeCheckpoint, onCheckpoint }) => {
+        const analysisPath = String(analysisResult.outputs?.[0] || '')
+        if (!analysisPath || !fs.existsSync(analysisPath)) throw new Error('成果工作流缺少可复用的视频分析底稿')
+        return documentWorkspace.run([analysisPath], bundleInstruction, 'auto', {
+          signal, onStatus: (value) => status(`（2/2）${value}`), onCheckpoint, resumeCheckpoint,
+          modelConfig: config, contextWindow: contextWindowForConfig(config), maxOutputTokens: maxOutputTokensForConfig(config),
+          modelLabel: `${config.providerName || config.providerId} · ${config.model}`
+        })
+      }
+    })
+    for (const outputPath of result.outputs || []) userAuthorizedPaths.add(path.resolve(outputPath))
+    const subtitlePath = findAdjacentSubtitle(sourcePath)
+    const intermediateOutputs = result.workflowReceipt?.steps?.find((item) => item.id === 'evidence-analysis')?.outputs || []
+    const projectCapsule = projectCapsules.recordTask({ projectId: task.spec.projectId, taskId: task.id, type: task.type, instruction: workflow.instruction, sources: [...task.spec.sources, ...(subtitlePath ? [subtitlePath] : [])], outputs: result.outputs || [], intermediateOutputs, historyId: result.historyId, operationKey: task.spec.operationKey, result })
+    return { ...result, projectCapsule }
+  }, { autoResume: true })
+  persistentTaskRuntime.register('project.trash', async ({ task, checkpoint }) => {
+    if (task.checkpoint?.stage === 'trashed' && task.checkpoint?.result) return task.checkpoint.result
+    const projectCapsule = projectCapsules.trash(task.spec.projectId)
+    const result = { success: true, chatOnly: true, summary: `项目《${projectCapsule.name}》已移入可恢复区；素材与成果文件均未删除`, projectCapsule }
+    checkpoint({ stage: 'trashed', result })
     return result
   }, { autoResume: true })
   persistentTaskRuntime.register('download.direct', async ({ task, signal, checkpoint, status }) => {
@@ -1863,6 +2106,237 @@ app.whenReady().then(async () => {
     return completed
   }, { autoResume: true })
 
+  persistentTaskRuntime.register('media.edit-trim', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.trim') throw new Error('冻结的剪辑决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的剪辑决策与源视频不一致')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在剪辑 ${decision.timeline.startSeconds}–${decision.timeline.endSeconds} 秒`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision: task.spec.decision, signal })
+      : await mediaEditService.trim({ sourcePath, outputPath, decision: task.spec.decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision: task.spec.decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-remove', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.remove-segment') throw new Error('冻结的删除片段决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的删除片段决策与源视频不一致')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在删除 ${decision.timeline.startSeconds}–${decision.timeline.endSeconds} 秒并重建连续时间线`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.removeSegment({ sourcePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-music', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath, frozenAudioPath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.add-music') throw new Error('冻结的配乐决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的配乐决策与源视频不一致')
+    const audioPath = assertAllowedPath(decision.audio?.path || '')
+    if (!frozenAudioPath || (path.resolve(audioPath) !== path.resolve(frozenAudioPath) && path.resolve(audioPath).toLowerCase() !== path.resolve(frozenAudioPath).toLowerCase())) throw new Error('冻结的配乐任务缺少音乐文件快照或路径不一致')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    const loudnessStatus = decision.audio?.loudness?.enabled === true
+      ? `、响度两遍测量并归一到 ${Number(decision.audio.loudness.targetLufs)} LUFS`
+      : '、不做响度归一'
+    status(`正在配乐（音量 ${Math.round((Number(decision.audio?.volume) || 0.15) * 100)}%${decision.audio?.duck !== false ? '、对白闪避' : ''}${loudnessStatus}）`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.addMusic({ sourcePath, outputPath, decision: { ...decision, audio: { ...decision.audio, path: audioPath } }, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-concat', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.concat-segments') throw new Error('冻结的多片段拼接决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的多片段拼接决策与源视频不一致')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在按指定顺序拼接 ${decision.timeline.segments.length} 个片段`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.concatSegments({ sourcePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-concat-sources', async ({ task, signal, checkpoint, status }) => {
+    const sourcePaths = validateMediaSources(task.spec.sources)
+    const [sourcePath] = sourcePaths
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.concat-sources') throw new Error('冻结的跨素材拼接决策无效')
+    assertEditDecisionList(decision)
+    const decisionSources = (Array.isArray(decision.sources) ? decision.sources : []).map((item) => path.resolve(String(item?.path || '')))
+    if (decisionSources.length < 2 || decisionSources.length > 20) throw new Error('冻结的跨素材拼接决策素材数量无效')
+    if (decisionSources[0] !== path.resolve(sourcePath)) throw new Error('冻结的跨素材拼接决策与源视频不一致')
+    if (decisionSources.length !== sourcePaths.length) throw new Error('冻结的跨素材拼接素材快照不完整')
+    decisionSources.forEach((item, index) => {
+      assertAllowedPath(item)
+      const snapshotPath = path.resolve(sourcePaths[index])
+      if (item !== snapshotPath && item.toLowerCase() !== snapshotPath.toLowerCase()) throw new Error(`冻结的跨素材拼接素材顺序不一致：${path.basename(item)}`)
+    })
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在按顺序拼接 ${decisionSources.length} 个素材`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.concatSources({ sourcePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-burn-subtitles', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.burn-subtitles') throw new Error('冻结的烧录字幕决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的烧录字幕决策与源视频不一致')
+    assertAllowedPath(decision.subtitle?.path || '')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在把字幕《${path.basename(String(decision.subtitle?.path || ''))}》烧录进画面`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.burnSubtitles({ sourcePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-mux-subtitles', async ({ task, signal, checkpoint, status }) => {
+    const [sourcePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.mux-subtitles') throw new Error('冻结的软字幕封装决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.source?.path || '')) !== path.resolve(sourcePath)) throw new Error('冻结的软字幕封装决策与源视频不一致')
+    assertAllowedPath(decision.subtitle?.path || '')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, sourcePath, decision.output.suffix, '.mp4', task.id)
+    status(`正在把字幕《${path.basename(String(decision.subtitle?.path || ''))}》封装成软字幕轨`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath, outputPath, decision, signal })
+      : await mediaEditService.muxSubtitles({ sourcePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.shift-subtitles', async ({ task, signal, checkpoint, status }) => {
+    const [subtitlePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.shift-subtitles') throw new Error('冻结的字幕调时决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.subtitle?.path || '')) !== path.resolve(subtitlePath)) throw new Error('冻结的字幕调时决策与字幕文件不一致')
+    assertAllowedPath(decision.subtitle?.path || '')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, subtitlePath, decision.output.suffix, decision.output?.container === 'vtt' ? '.vtt' : '.srt', task.id)
+    status(`正在把字幕《${path.basename(subtitlePath)}》整体${decision.shift?.direction === 'earlier' ? '提前' : '延后'} ${Number(decision.shift?.offsetSeconds || 0).toFixed(3)} 秒`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath: subtitlePath, outputPath, decision, signal })
+      : await mediaEditService.shiftSubtitles({ sourcePath: subtitlePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath: subtitlePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.translate-subtitles', async ({ task, signal, checkpoint, status }) => {
+    const [subtitlePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.translate-subtitles') throw new Error('冻结的字幕翻译决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.subtitle?.path || '')) !== path.resolve(subtitlePath)) throw new Error('冻结的字幕翻译决策与字幕文件不一致')
+    assertAllowedPath(decision.subtitle?.path || '')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, subtitlePath, decision.output.suffix, '.srt', task.id)
+    // 冻结引擎重建：离线组件或冻结的云端路由；路由变化/凭证失效即故障关闭
+    const engineChoice = String(task.spec.engineChoice || '')
+    let engine = null
+    if (engineChoice === 'offline') {
+      if (!offlineTranslate.availability().available) throw new Error('本地离线翻译组件已不可用，请重新安装或改配云端模型')
+      engine = { complete: (input) => offlineTranslate.jsonComplete(input), label: '本地离线翻译' }
+    } else if (engineChoice === 'cloud') {
+      const routeConfig = resolveTaskModelRoute(task.spec.modelRoute)
+      engine = {
+        complete: ({ systemPrompt, prompt, signal: callSignal, timeoutMs }) => llmComplete({ systemPrompt, prompt, signal: callSignal, timeoutMs, modelConfig: routeConfig, taskKind: 'subtitle-translation' }),
+        label: `${routeConfig.providerName} · ${routeConfig.model}`
+      }
+    } else {
+      throw new Error('冻结的翻译引擎无效，请重新发起翻译')
+    }
+    status(`正在把字幕《${path.basename(subtitlePath)}》翻译成${decision.translate?.mode === 'bilingual' ? '双语对照' : (decision.translate?.targetLang || '目标语言')}（${engine.label}）`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath: subtitlePath, outputPath, decision, signal })
+      : await mediaEditService.translateSubtitles({
+        sourcePath: subtitlePath,
+        outputPath,
+        decision,
+        engine,
+        signal,
+        onProgress: ({ done, total }) => status(`正在翻译 ${done}/${total} 条`)
+      })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath: subtitlePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
+  persistentTaskRuntime.register('media.edit-subtitle-cues', async ({ task, signal, checkpoint, status }) => {
+    const [subtitlePath] = validateMediaSources(task.spec.sources)
+    const decision = task.spec.decision
+    if (!decision || decision.schemaVersion !== 1 || decision.kind !== 'media.edit-subtitle-cues') throw new Error('冻结的字幕校对决策无效')
+    assertEditDecisionList(decision)
+    if (path.resolve(String(decision.subtitle?.path || '')) !== path.resolve(subtitlePath)) throw new Error('冻结的字幕校对决策与字幕文件不一致')
+    assertAllowedPath(decision.subtitle?.path || '')
+    const outputPath = validatePlannedMediaOutput(task.spec.outputPath, subtitlePath, decision.output.suffix, decision.output?.container === 'vtt' ? '.vtt' : '.srt', task.id)
+    status(`正在校对字幕《${path.basename(subtitlePath)}》`)
+    const result = fs.existsSync(outputPath)
+      ? await mediaEditService.verify({ sourcePath: subtitlePath, outputPath, decision, signal })
+      : await mediaEditService.editSubtitleCues({ sourcePath: subtitlePath, outputPath, decision, signal })
+    validateMediaSources(task.spec.sources)
+    const projectCapsule = mediaEditProjects.recordEdit({ taskId: task.id, sourcePath: subtitlePath, outputPath, decision, repairing: task.checkpoint?.stage === 'quality-repair' })
+    const completed = { ...result, projectCapsule }
+    checkpoint({ stage: 'artifact-written', result: completed })
+    userAuthorizedPaths.add(path.resolve(outputPath))
+    return completed
+  }, { autoResume: true })
+
   persistentTaskRuntime.register('media.dedup', async ({ task, signal, checkpoint, status }) => {
     const root = validateFrozenDirectoryRoot(task.spec.root)
     const hashCache = task.checkpoint?.hashCache && typeof task.checkpoint.hashCache === 'object' ? { ...task.checkpoint.hashCache } : {}
@@ -1954,6 +2428,124 @@ app.whenReady().then(async () => {
       return { ...task.result, requestId }
     } catch (error) {
       return { success: false, requestId, error: error instanceof Error ? error.message : String(error), results: [], kind }
+    }
+  })
+
+  // 明确时间段剪辑：先冻结唯一时间线，再由主进程另存、探测并回执；询问/否定/举例不会进入写文件路径。
+  ipcMain.handle('media:edit-plan', (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      const sourcePath = assertAllowedPath(input.sourcePath)
+      return mediaEditConversation.plan({ instruction: input.instruction, sourcePath, clarificationId: input.clarificationId })
+    } catch (error) {
+      return { matched: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('media:edit-history-plan', (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      assertAllowedPath(input.currentPath)
+      const action = compileEditHistoryAction(input.instruction)
+      return action ? { matched: true, action } : { matched: false }
+    } catch (error) {
+      return { matched: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('media:edit-history', (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      const currentPath = assertAllowedPath(input.currentPath)
+      const action = compileEditHistoryAction(input.instruction)
+      if (!action) return { success: false, matched: false, error: '这句话不是明确的剪辑撤销或重做指令' }
+      const result = mediaEditProjects.navigate({ currentPath, direction: action.action })
+      if (!result.success) return { ...result, matched: true }
+      userAuthorizedPaths.add(path.resolve(result.currentPath))
+      const summary = action.action === 'undo'
+        ? `已撤销刚才的剪辑，正在打开上一版：${path.basename(result.currentPath)}`
+        : `已重做刚才撤销的剪辑，正在打开下一版：${path.basename(result.currentPath)}`
+      return { ...result, matched: true, summary }
+    } catch (error) {
+      return { success: false, matched: true, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('media:trim', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const requestId = normalizeRequestId(input.requestId, 'media-edit-trim')
+    try {
+      const sourcePath = assertAllowedPath(input.sourcePath)
+      const rawDecision = compileConcatSourcesDecisionList({ instruction: input.instruction, sourcePath }) || compileMusicDecisionList({ instruction: input.instruction, sourcePath }) || compileBurnSubtitlesDecisionList({ instruction: input.instruction, sourcePath }) || compileMuxSubtitlesDecisionList({ instruction: input.instruction, sourcePath }) || compileTranslateSubtitlesDecisionList({ instruction: input.instruction, sourcePath }) || compileCueEditDecisionList({ instruction: input.instruction, sourcePath }) || compileShiftSubtitlesDecisionList({ instruction: input.instruction, sourcePath }) || compileEditDecisionList({ instruction: input.instruction, sourcePath })
+      const decision = rawDecision ? attachEditDecisionList(rawDecision) : null
+      if (!decision) return { success: false, matched: false, error: '这句话还不能形成唯一剪辑时间线，请明确说“保留第4秒到第20秒”“删除第4秒到第8秒”或“把第8秒到第12秒放前面，再接第0秒到第4秒”' }
+      const taskType = decision.kind === 'media.concat-sources'
+        ? 'media.edit-concat-sources'
+        : decision.kind === 'media.concat-segments'
+          ? 'media.edit-concat'
+          : decision.kind === 'media.add-music'
+            ? 'media.edit-music'
+            : decision.kind === 'media.burn-subtitles'
+              ? 'media.edit-burn-subtitles'
+              : decision.kind === 'media.mux-subtitles'
+                ? 'media.edit-mux-subtitles'
+                : decision.kind === 'media.translate-subtitles'
+                  ? 'media.translate-subtitles'
+                  : decision.kind === 'media.edit-subtitle-cues'
+                    ? 'media.edit-subtitle-cues'
+                    : decision.kind === 'media.shift-subtitles'
+                      ? 'media.shift-subtitles'
+                      : decision.kind === 'media.remove-segment' ? 'media.edit-remove' : 'media.edit-trim'
+      if (taskType !== 'media.shift-subtitles' && taskType !== 'media.translate-subtitles' && taskType !== 'media.edit-subtitle-cues' && !videoFrames.availability().available) return { success: false, error: '缺少 ffmpeg 组件（随 yt-dlp 组件包提供），请先在模型接入中心下载' }
+      const allSourcePaths = decision.kind === 'media.concat-sources'
+        ? decision.sources.map((item) => assertAllowedPath(item?.path || ''))
+        : decision.kind === 'media.add-music'
+          ? [sourcePath, assertAllowedPath(decision.audio?.path || '')]
+          : decision.kind === 'media.shift-subtitles' || decision.kind === 'media.translate-subtitles' || decision.kind === 'media.edit-subtitle-cues'
+            ? [assertAllowedPath(decision.subtitle?.path || '')]
+            : [sourcePath]
+      const outputExtension = decision.output?.container === 'vtt' ? '.vtt' : decision.output?.container === 'srt' ? '.srt' : '.mp4'
+      const outputAnchor = decision.kind === 'media.shift-subtitles' || decision.kind === 'media.translate-subtitles' || decision.kind === 'media.edit-subtitle-cues' ? allSourcePaths[0] : sourcePath
+      // 字幕翻译：在入队前冻结引擎与模型路由；云端先过原生同意框，拒绝则回退本地离线组件（仅英译中）
+      let engineChoice = ''
+      let modelRoute = null
+      if (decision.kind === 'media.translate-subtitles') {
+        const subtitleText = decodeSubtitleText(fs.readFileSync(allSourcePaths[0]))
+        const cueCount = parseSrtCues(subtitleText).length
+        if (!cueCount) return { success: false, matched: true, error: '字幕文件里没有可识别的有效条目（需要标准 srt 时间轴）' }
+        const entries = parseSrt(subtitleText)
+        const targetLang = decision.translate?.targetLang === 'auto' || !decision.translate?.targetLang ? chooseOppositeTarget(entries) : decision.translate.targetLang
+        const engine = pickTranslateEngine(entries, targetLang, 'auto')
+        if (!engine) return { success: false, matched: true, error: `没有可用的${targetLang}翻译方式：请配置云端模型，或到模型接入中心下载本地离线翻译组件（支持英译中）` }
+        if (engine.offline) {
+          engineChoice = 'offline'
+        } else {
+          const approved = await ensureCloudConsent(`把字幕原文发送给 ${engine.label} 翻译成${targetLang}；视频文件不会上传`)
+          if (approved) {
+            engineChoice = 'cloud'
+            modelRoute = freezeTaskModelRoute(creativeConfig(), { taskKind: 'subtitle-translation' })
+          } else if (offlineTranslate.availability().available && shouldUseOffline(entries, targetLang)) {
+            engineChoice = 'offline'
+          } else {
+            return { success: false, matched: true, cancelled: true, error: targetLang === '英文' ? '已取消：未授权发送云端；中译英暂无本地离线组件，需要配置云端模型' : '已取消：未授权发送云端；也可以到模型接入中心下载本地离线翻译组件（英译中免费）' }
+          }
+        }
+      }
+      persistentTaskRuntime.enqueue({
+        id: requestId,
+        type: taskType,
+        workspaceTaskId: input.workspaceTaskId,
+        spec: {
+          instruction: decision.instruction,
+          decision,
+          sources: snapshotMediaSources(allSourcePaths),
+          outputPath: plannedMediaOutput(outputAnchor, decision.output.suffix, outputExtension, requestId),
+          ...(engineChoice ? { engineChoice } : {}),
+          ...(modelRoute ? { modelRoute } : {})
+        }
+      })
+      const task = await persistentTaskRuntime.run(requestId)
+      if (task.state !== 'completed') return { success: false, matched: true, requestId, cancelled: task.state === 'cancelled', error: task.error || '视频剪辑未完成' }
+      return { ...task.result, matched: true, requestId }
+    } catch (error) {
+      return { success: false, matched: true, requestId, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
@@ -2459,7 +3051,18 @@ app.whenReady().then(async () => {
       }
       task = await persistentTaskRuntime.run(requestId)
       if (task.state !== 'completed') {
-        return { success: false, requestId, error: task.error || '文档处理未完成' }
+        return {
+          success: false,
+          requestId,
+          error: task.failure?.message || task.error || '文档处理未完成',
+          outputs: task.result?.outputs || [],
+          summary: task.result?.summary || '',
+          failures: task.result?.failures || {},
+          deliveryReceipt: task.result?.deliveryReceipt,
+          quality: task.quality || null,
+          repairHistory: task.repairHistory || [],
+          failure: task.failure || null
+        }
       }
       return { ...task.result, requestId }
     } catch (error) {
@@ -3133,9 +3736,15 @@ app.whenReady().then(async () => {
       const { translations, failed } = await translateEntries(entries, engine.complete, {
         targetLang,
         signal,
+        initialTranslations: task.checkpoint?.translationTarget === targetLang ? task.checkpoint?.translations : [],
         onProgress: ({ done, total, failed: failedCount }) => {
           reportStatus(`正在翻译成${targetLang} ${done}/${total}${failedCount ? `（${failedCount} 段待重试）` : ''}`)
-        }
+        },
+        onCheckpoint: ({ translations: savedTranslations, done, total, failed: failedCount }) => checkpoint({
+          stage: 'translation-progress', translations: savedTranslations, translationTarget: targetLang,
+          translationDone: done, translationTotal: total, translationFailed: failedCount,
+          ...(sourceTranscriptSnapshot ? { sourceTranscript: sourceTranscriptSnapshot } : {})
+        })
       })
       if (translations.size === 0) return failWithResult({ success: false, error: `翻译没有返回可用${targetLang}（${engine.label}），未写出无效字幕` })
       const translatedSrt = buildTranslationOnlySrt(entries, translations, { targetLang })
@@ -3490,6 +4099,150 @@ app.whenReady().then(async () => {
   ipcMain.handle('studio:offline-analysis', (event, input = {}) => {
     assertTrustedSender(event)
     return buildOfflineAnalysis(input)
+  })
+  ipcMain.handle('outcome:detect', (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      const sourcePath = assertAllowedPath(input.sourcePath)
+      const workflow = compileOutcomeWorkflow({ sourcePath, instruction: input.instruction })
+      return workflow ? { matched: true, formats: workflow.deliverables.formats, steps: workflow.steps.map((step) => step.id) } : { matched: false, formats: [], steps: [] }
+    } catch {
+      return { matched: false, formats: [], steps: [] }
+    }
+  })
+  ipcMain.handle('outcome:run', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const requestId = normalizeRequestId(input.requestId, 'outcome')
+    try {
+      const prepared = preparePersistentOutcomeTask(input)
+      let task = persistentTaskRuntime.enqueue({
+        id: requestId,
+        type: 'outcome.workflow',
+        workspaceTaskId: input.workspaceTaskId,
+        spec: prepared.spec,
+        approval: prepared.approval
+      })
+      if (task.state === 'waiting_approval') {
+        if (input.cloudApproved === true) task = persistentTaskRuntime.approve(task.approval.id, task.approval.token)
+        else return { success: false, requiresApproval: true, requestId, approval: task.approval }
+      }
+      task = await persistentTaskRuntime.run(requestId)
+      if (task.state !== 'completed') {
+        return { success: false, requestId, error: task.failure?.message || task.error || '成果工作流未完成', outputs: task.result?.outputs || [], quality: task.quality || null, failure: task.failure || null }
+      }
+      return { ...task.result, requestId }
+    } catch (error) {
+      return { success: false, requestId, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('outcome:cancel', (event, requestId) => {
+    assertTrustedSender(event)
+    return persistentTaskRuntime.cancel(String(requestId || ''))
+  })
+  ipcMain.handle('projects:list', (event) => {
+    assertTrustedSender(event)
+    return projectCapsules.list()
+  })
+  ipcMain.handle('projects:get', (event, projectId) => {
+    assertTrustedSender(event)
+    return projectCapsules.get(String(projectId || ''))
+  })
+  ipcMain.handle('projects:list-trash', (event) => { assertTrustedSender(event); return projectCapsules.listTrash() })
+  ipcMain.handle('projects:archive', (event, input = {}) => { assertTrustedSender(event); return projectCapsules.archive(String(input.projectId || ''), input.archived !== false) })
+  ipcMain.handle('projects:copy', (event, projectId) => { assertTrustedSender(event); return projectCapsules.copy(String(projectId || '')) })
+  ipcMain.handle('projects:restore', (event, projectId) => { assertTrustedSender(event); return projectCapsules.restore(String(projectId || '')) })
+  ipcMain.handle('projects:trash', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const projectId = String(input.projectId || '')
+    const project = projectCapsules.get(projectId)
+    if (!project) return { success: false, error: '项目不存在' }
+    const taskId = normalizeRequestId(input.requestId, 'project-trash')
+    let task = persistentTaskRuntime.enqueue({ id: taskId, type: 'project.trash', spec: { projectId }, approval: { action: 'delete', summary: `把项目《${project.name || projectId}》移入可恢复区；不会删除任何素材或成果文件` } })
+    if (task.state === 'waiting_approval') {
+      if (input.approvalId && input.approvalToken) task = persistentTaskRuntime.approve(input.approvalId, input.approvalToken)
+      else return { success: false, requiresApproval: true, requestId: taskId, approval: task.approval }
+    }
+    task = await persistentTaskRuntime.run(taskId)
+    return task.state === 'completed' ? { ...task.result, requestId: taskId } : { success: false, error: task.error || '项目未移入回收区' }
+  })
+  ipcMain.handle('links:detect', (event, text) => {
+    assertTrustedSender(event)
+    return publicLinkService.detect(text)
+  })
+  ipcMain.handle('links:handle', async (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      const inspected = await publicLinkService.inspect(input.url)
+      if (inspected.access !== 'public') return { success: false, controlled: true, ...inspected }
+      const instruction = String(input.instruction || '')
+      if (/下载|保存/.test(instruction)) {
+        const downloaded = await publicLinkService.download(inspected.url, path.join(app.getPath('documents'), 'AgentPlay 输出', '公开内容'))
+        userAuthorizedPaths.add(path.resolve(downloaded.outputPath))
+        return { success: true, action: 'download', ...downloaded }
+      }
+      if (/加入项目|保存到项目|放进项目/.test(instruction)) {
+        const projectId = projectCapsules.newProjectId()
+        const projectCapsule = projectCapsules.recordTask({ projectId, taskId: `link-${crypto.randomUUID()}`, type: 'link.reference', instruction, references: [{ kind: inspected.kind, uri: inspected.url }], outputs: [], result: { success: true, preview: inspected } })
+        return { success: true, action: 'project', ...inspected, projectCapsule }
+      }
+      if (/翻译/.test(instruction) && inspected.excerpt) {
+        const config = modelConfigStore.resolved('chat')
+        const requiresKey = config?.requiresKey !== false
+        if (config?.configured === false || !config?.baseUrl || !config?.model || (requiresKey && !config.apiKey)) throw new Error('翻译公开内容需要先配置可用模型')
+        if (!isLocalModelConfig(config)) {
+          const approved = await ensureCloudConsent(`把公开网页摘录发送给 ${config.providerName || config.providerId} · ${config.model} 翻译；不发送浏览器Cookie或登录信息`)
+          if (!approved) return { success: false, cancelled: true, error: '已取消：未授权云端翻译' }
+        }
+        const translated = await llmComplete({ systemPrompt: '你是忠实翻译器，只翻译提供的公开内容，不补充事实。', prompt: `翻译成中文：\n${inspected.excerpt}`, modelConfig: config, taskKind: 'document' })
+        return { success: true, action: 'translate', ...inspected, translated: translated.text }
+      }
+      return { success: true, action: 'preview', ...inspected }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('evidence:inspect-file', async (event, filePath) => {
+    assertTrustedSender(event)
+    const resolved = assertAllowedPath(filePath)
+    return { source: resolved, evidence: await inspectEvidencePath(resolved) }
+  })
+  ipcMain.handle('cross-material:detect', (event, input = {}) => {
+    assertTrustedSender(event)
+    try {
+      const tokens = Array.isArray(input.tokens) ? input.tokens.slice(0, 20) : []
+      const paths = tokens.map(documentSelectionFromToken)
+      if (input.currentPath) paths.push(assertAllowedPath(input.currentPath))
+      const context = resolveCrossMaterialContext(paths)
+      const sourceCount = new Set([...context.sourcePaths, ...context.referenceEvidence.map((item) => String(item?.source || '')).filter(Boolean)]).size
+      return { matched: detectCrossMaterialQuestion(input.question) && sourceCount >= 2, sourceCount, projectId: context.projectId }
+    } catch (error) {
+      return { matched: false, sourceCount: 0, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('cross-material:ask', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const requestId = normalizeRequestId(input.requestId, 'cross-material')
+    try {
+      const tokens = Array.isArray(input.tokens) ? input.tokens.slice(0, 20) : []
+      const paths = tokens.map(documentSelectionFromToken)
+      if (input.currentPath) paths.push(assertAllowedPath(input.currentPath))
+      const prepared = preparePersistentCrossMaterialTask(paths, input)
+      if (!prepared.matched) return { success: false, matched: false, requestId, error: '当前指令不是跨素材问答' }
+      let task = persistentTaskRuntime.enqueue({ id: requestId, type: 'project.evidence-qa', workspaceTaskId: input.workspaceTaskId, spec: prepared.spec, approval: prepared.approval })
+      if (task.state === 'waiting_approval') {
+        if (input.cloudApproved === true) task = persistentTaskRuntime.approve(task.approval.id, task.approval.token)
+        else return { success: false, matched: true, requiresApproval: true, requestId, approval: task.approval }
+      }
+      task = await persistentTaskRuntime.run(requestId)
+      if (task.state !== 'completed') return { success: false, matched: true, requestId, error: task.failure?.message || task.error || '跨素材问答未完成', quality: task.quality || null, failure: task.failure || null }
+      return { ...task.result, matched: true, requestId, quality: task.quality || null }
+    } catch (error) {
+      return { success: false, matched: true, requestId, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  ipcMain.handle('cross-material:cancel', (event, requestId) => {
+    assertTrustedSender(event)
+    return persistentTaskRuntime.cancel(String(requestId || ''))
   })
   // 对话流视频解剖：AI 助手面板直接对当前视频发起，报告经文档工作台另存，原文件不动
   ipcMain.handle('analysis:detect', (event, text) => {

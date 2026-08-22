@@ -16,9 +16,11 @@ type TaskCommandOptions = {
   runDownloadTask: (url: string, instruction: string, direct?: boolean) => Promise<void>
   runLinkAnalysisTask: (url: string, instruction: string, forceApprove?: boolean) => Promise<void>
   retryStoredAnalysisTask: (retry: WorkspaceTaskRetry) => Promise<void> | undefined
+  retryStoredOutcomeTask: (retry: WorkspaceTaskRetry) => Promise<void> | undefined
   retryStoredMediaCreative: (retry: WorkspaceTaskRetry) => boolean
   retryActiveLinkTask: () => Promise<void>
   retryActiveDocumentAnalysis: () => Promise<void>
+  retryActiveCrossMaterialQuestion: () => Promise<boolean>
   retryActiveMediaCreative: () => boolean
 }
 
@@ -26,9 +28,9 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
   const {
     pendingTaskRef, requestIdRef, cancellableTaskId, closeTaskCenter,
     updateTask, mutateTask, addMessage, releaseCancelableRequest,
-    runDownloadTask, runLinkAnalysisTask, retryStoredAnalysisTask,
+    runDownloadTask, runLinkAnalysisTask, retryStoredAnalysisTask, retryStoredOutcomeTask,
     retryStoredMediaCreative, retryActiveLinkTask,
-    retryActiveDocumentAnalysis, retryActiveMediaCreative
+    retryActiveDocumentAnalysis, retryActiveCrossMaterialQuestion, retryActiveMediaCreative
   } = options
 
   const retryStoredTask = (record: AgentTask) => {
@@ -47,8 +49,12 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
       void retryStoredAnalysisTask(retry)
       return
     }
+    if (retry.kind === 'outcome' && retry.sourcePath) {
+      void retryStoredOutcomeTask(retry)
+      return
+    }
     if (retryStoredMediaCreative(retry)) return
-    addMessage('agent', retry.kind === 'doc' || retry.kind === 'batch'
+    addMessage('agent', retry.kind === 'doc' || retry.kind === 'batch' || retry.kind === 'cross-qa'
       ? '这个任务需要重新授权原文件。请再次添加文件，原任务和结果记录不会丢失。'
       : '这个任务缺少可安全恢复的源数据，请从原素材重新发起。')
   }
@@ -61,12 +67,17 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
         void retryActiveLinkTask()
         return
       case 'analysis':
+      case 'outcome':
       case 'doc':
         void retryActiveDocumentAnalysis()
+        return
+      case 'cross-qa':
+        void retryActiveCrossMaterialQuestion()
         return
       case 'dedup':
       case 'batch':
       case 'compress':
+      case 'trim':
       case 'video-gen':
       case 'recut':
         if (!retryActiveMediaCreative()) addMessage('agent', '[错误] 当前任务缺少可安全重试的输入，请从原素材重新发起。')
@@ -88,6 +99,9 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
         case 'analysis':
           cancelled = await window.aiPlayer?.analysis?.cancel(requestId) || false
           break
+        case 'outcome':
+          cancelled = await window.aiPlayer?.outcomeWorkflow?.cancel(requestId) || false
+          break
         case 'dedup':
           cancelled = await window.aiPlayer?.media?.cancel(requestId) || false
           break
@@ -95,6 +109,7 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
           cancelled = await window.aiPlayer?.mediaBatch?.cancel(requestId) || false
           break
         case 'compress':
+        case 'trim':
           cancelled = await window.aiPlayer?.mediaTools?.cancel(requestId) || false
           break
         case 'video-gen':
@@ -103,6 +118,9 @@ export function createTaskCommandDispatcher(options: TaskCommandOptions) {
           break
         case 'doc':
           cancelled = await window.aiPlayer?.documents?.cancel(requestId) || false
+          break
+        case 'cross-qa':
+          cancelled = await window.aiPlayer?.crossMaterial?.cancel(requestId) || false
           break
       }
       if (!cancelled) throw new Error('后台没有确认取消，任务状态保持不变')

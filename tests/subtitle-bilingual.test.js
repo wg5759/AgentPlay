@@ -132,6 +132,22 @@ test('translateEntries reports progress and stops before the next batch when can
   assert.deepEqual(progress, [[10, 25]])
 })
 
+test('translateEntries resumes completed batches without repeating model calls', async () => {
+  const entries = Array.from({ length: 4 }, (_, index) => ({ index: index + 1, start: '', end: '', text: `line ${index + 1}` }))
+  const checkpoints = []
+  const calls = []
+  const complete = async ({ prompt }) => {
+    const items = JSON.parse(prompt.split('\n').pop()).items
+    calls.push(items.map((item) => item.i))
+    return { text: JSON.stringify({ translations: items.map((item) => ({ i: item.i, text: `译${item.i}` })) }) }
+  }
+  const first = await translateEntries(entries.slice(0, 2), complete, { batchSize: 2, onCheckpoint: (value) => checkpoints.push(value) })
+  assert.equal(first.translations.size, 2)
+  const resumed = await translateEntries(entries, complete, { batchSize: 2, initialTranslations: checkpoints.at(-1).translations })
+  assert.deepEqual(calls, [[1, 2], [3, 4]], '已完成的 1/2 不得在恢复后再次发送给模型')
+  assert.equal(resumed.translations.size, 4)
+})
+
 test('转写组件清单与托管资产哈希锁定', () => {
   const model = WHISPER_MANIFEST.assets.find((asset) => asset.role === 'model')
   const engine = WHISPER_MANIFEST.assets.find((asset) => asset.kind === 'zip')

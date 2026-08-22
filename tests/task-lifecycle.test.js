@@ -45,6 +45,8 @@ test('cold start fail-closes unfinished tasks as interrupted instead of pretendi
 
 test('task progress parsing is bounded and queue history is capped', () => {
   assert.equal(progressFromStatus('（3/4）正在处理'), 75)
+  assert.equal(progressFromStatus('正在下载 42%'), 42)
+  assert.equal(progressFromStatus('正在下载 120%'), 100)
   assert.equal(progressFromStatus('正在准备'), null)
   const raw = Array.from({ length: 90 }, (_, index) => ({ id: String(index), updatedAt: index, phase: 'completed' }))
   const restored = restoreWorkspaceTasks(raw, 500)

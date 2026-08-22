@@ -32,8 +32,8 @@ test('bundle sections are generated one format per model call', async () => {
   const calls = []
   const workspace = makeWorkspace(async ({ prompt, timeoutMs }) => {
     calls.push({ prompt, timeoutMs })
-    if (prompt.includes('本次只生成 PPTX')) return { text: '{"title":"演示","slides":[{"title":"页1","bullets":["要点"]}]}' }
-    return { text: '{"title":"交付","content":"正文"}' }
+    if (prompt.includes('本次只生成 PPTX')) return { text: '{"title":"演示","slides":[{"title":"页1","bullets":["要点"]}],"factIds":["F1"]}' }
+    return { text: '{"title":"交付","content":"正文","factIds":["F1"]}' }
   })
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-src-'))
   const plan = makePlan(root, ['pptx', 'pdf'])
@@ -49,7 +49,7 @@ test('bundle sections are generated one format per model call', async () => {
 test('one failing format does not kill the others and is reported honestly', async () => {
   const workspace = makeWorkspace(async ({ prompt }) => {
     if (prompt.includes('本次只生成 PDF')) throw new Error('模型响应超时')
-    return { text: '{"title":"演示","slides":[{"title":"页1","bullets":["要点"]}]}' }
+    return { text: '{"title":"演示","slides":[{"title":"页1","bullets":["要点"]}],"factIds":["F1"]}' }
   })
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bundle-src-'))
   const bundle = await workspace.buildBundleSections(makePlan(root, ['pptx', 'pdf']), {})

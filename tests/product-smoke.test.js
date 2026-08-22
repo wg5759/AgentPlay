@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const test = require('node:test')
+const { once } = require('node:events')
 const { agentPanelSource } = require('./helpers/agent-panel-source')
 
 const { AgentEngine } = require('../electron/llm-service')
@@ -527,8 +528,10 @@ test('cast file server authorizes a selected file and supports byte ranges', asy
     assert.equal(response.headers.get('content-range'), 'bytes 2-5/10')
     assert.equal(await response.text(), '2345')
   } finally {
+    const serverClosed = cast.fileServer?.listening ? once(cast.fileServer, 'close') : Promise.resolve()
     cast.stop()
-    fs.rmSync(dir, { recursive: true, force: true })
+    await serverClosed
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 

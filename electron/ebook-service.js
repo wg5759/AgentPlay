@@ -15,19 +15,22 @@ function assertSafeIdentifier(identifier) {
   return id
 }
 
-async function fetchBuffer(url, timeoutMs = FETCH_TIMEOUT_MS) {
+async function fetchBuffer(url, { timeoutMs = FETCH_TIMEOUT_MS, attempts = 3, retryDelayMs = 1500, fetchImpl = globalThis.fetch } = {}) {
   // archive.org 会 302 到各国镜像节点，个别镜像超时是常态：重试 3 次再如实报错
   let lastError = null
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  const boundedAttempts = Math.max(1, Math.min(5, Number(attempts) || 1))
+  const boundedTimeout = Math.max(10, Math.min(120000, Number(timeoutMs) || FETCH_TIMEOUT_MS))
+  const boundedDelay = Math.max(0, Math.min(5000, Number(retryDelayMs) || 0))
+  for (let attempt = 0; attempt < boundedAttempts; attempt += 1) {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const timer = setTimeout(() => controller.abort(), boundedTimeout)
     try {
-      const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': 'AgentPlay/0.7 (public-domain ebooks)' } })
+      const response = await fetchImpl(url, { signal: controller.signal, headers: { 'User-Agent': 'AgentPlay/0.7 (public-domain ebooks)' } })
       if (!response.ok) throw new Error(`下载返回 ${response.status}`)
       return Buffer.from(await response.arrayBuffer())
     } catch (error) {
       lastError = error.name === 'AbortError' ? new Error('下载超时，请检查网络后重试') : error
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      if (attempt + 1 < boundedAttempts && boundedDelay > 0) await new Promise((resolve) => setTimeout(resolve, boundedDelay))
     } finally {
       clearTimeout(timer)
     }
@@ -36,7 +39,7 @@ async function fetchBuffer(url, timeoutMs = FETCH_TIMEOUT_MS) {
 }
 
 // 取书：优先 epub（有章节结构），退而 txt；缓存到本地，重复打开不下载
-async function fetchBook(cacheRoot, identifier, fileName) {
+async function fetchBook(cacheRoot, identifier, fileName, options = {}) {
   const id = assertSafeIdentifier(identifier)
   const safeName = path.basename(String(fileName || ''))
   if (!/\.(epub|txt)$/i.test(safeName)) throw new Error('只支持 epub/txt 书源')
@@ -44,7 +47,7 @@ async function fetchBook(cacheRoot, identifier, fileName) {
   const cached = path.join(dir, safeName)
   if (fs.existsSync(cached) && fs.statSync(cached).size > 0) return cached
   const url = `${DOWNLOAD_BASE}${encodeURIComponent(id)}/${encodeURIComponent(safeName)}`
-  const buffer = await fetchBuffer(url)
+  const buffer = await fetchBuffer(url, options)
   fs.mkdirSync(dir, { recursive: true })
   const tempPath = `${cached}.${process.pid}.tmp`
   fs.writeFileSync(tempPath, buffer)
@@ -154,4 +157,4 @@ function writeTranslationCache(cacheRoot, identifier, engine, chapterIndex, text
   fs.renameSync(tempPath, file)
 }
 
-module.exports = { fetchBook, parseEpubChapters, parseTxtChapters, readTranslationCache, writeTranslationCache, stripXhtml }
+module.exports = { fetchBook, parseEpubChapters, parseTxtChapters, readTranslationCache, writeTranslationCache, stripXhtml, __test: { fetchBuffer } }

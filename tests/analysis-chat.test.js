@@ -151,6 +151,37 @@ test('chat analysis sends frames to vision model and reports multimodal evidence
   assert.match(result.summary, /多模态拉片/)
 })
 
+test('analysis resumes a persisted model draft without repeating the model call', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'analysis-resume-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const videoPath = makeVideoWithSubtitle(root)
+  const checkpoint = {}
+  let calls = 0
+  await assert.rejects(runChatAnalysis({
+    sourcePath: videoPath, mediaName: '样片.mp4', duration: 12,
+    instruction: '深度解剖', outputFormat: 'md', cloudApproved: true,
+    workspace: makeWorkspace(root),
+    model: { configured: true, local: true, provider: '本机测试', model: 'analysis-test' },
+    complete: async () => { calls += 1; return { text: validDeepAnalysis('检查点初稿。') } },
+    onCheckpoint: (patch) => {
+      Object.assign(checkpoint, patch)
+      if (patch.stage === 'analysis-model-complete') throw new Error('模拟模型完成后进程退出')
+    }
+  }), /模拟模型完成后进程退出/)
+  assert.equal(calls, 1)
+  assert.equal(checkpoint.stage, 'analysis-model-complete')
+
+  const resumed = await runChatAnalysis({
+    sourcePath: videoPath, mediaName: '样片.mp4', duration: 12,
+    instruction: '深度解剖', outputFormat: 'md', cloudApproved: true,
+    workspace: makeWorkspace(root), resumeCheckpoint: checkpoint,
+    model: { configured: true, local: true, provider: '本机测试', model: 'analysis-test' },
+    complete: async () => { throw new Error('已持久化的分析模型结果不应重复调用') }
+  })
+  assert.equal(resumed.success, true)
+  assert.match(fs.readFileSync(resumed.outputs[0], 'utf8'), /检查点初稿/)
+})
+
 test('default DOCX analysis uses the professional renderer and embeds selected evidence frames', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'analysis-chat-'))
   const videoPath = makeVideoWithSubtitle(root)

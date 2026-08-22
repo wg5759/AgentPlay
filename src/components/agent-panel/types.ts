@@ -27,4 +27,4 @@ export type SuggestedAction = {
   text: string
 }
 
-export type PendingTaskKind = 'doc' | 'analysis' | 'download' | 'link-analysis' | 'batch' | 'compress' | 'video-gen' | 'dedup' | 'recut'
+export type PendingTaskKind = 'doc' | 'analysis' | 'outcome' | 'cross-qa' | 'download' | 'link-analysis' | 'batch' | 'compress' | 'trim' | 'video-gen' | 'dedup' | 'recut'

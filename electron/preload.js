@@ -79,6 +79,42 @@ contextBridge.exposeInMainWorld('aiPlayer', {
       return () => ipcRenderer.removeListener('analysis:status', handler)
     }
   },
+  outcomeWorkflow: {
+    detect: (input) => ipcRenderer.invoke('outcome:detect', input),
+    run: (input) => ipcRenderer.invoke('outcome:run', input),
+    cancel: (requestId) => ipcRenderer.invoke('outcome:cancel', requestId),
+    onStatus: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('outcome:status', handler)
+      return () => ipcRenderer.removeListener('outcome:status', handler)
+    }
+  },
+  projects: {
+    list: () => ipcRenderer.invoke('projects:list'),
+    get: (projectId) => ipcRenderer.invoke('projects:get', projectId),
+    listTrash: () => ipcRenderer.invoke('projects:list-trash'),
+    archive: (input) => ipcRenderer.invoke('projects:archive', input),
+    copy: (projectId) => ipcRenderer.invoke('projects:copy', projectId),
+    trash: (input) => ipcRenderer.invoke('projects:trash', input),
+    restore: (projectId) => ipcRenderer.invoke('projects:restore', projectId)
+  },
+  linkContent: {
+    detect: (text) => ipcRenderer.invoke('links:detect', text),
+    handle: (input) => ipcRenderer.invoke('links:handle', input)
+  },
+  evidence: {
+    inspectFile: (filePath) => ipcRenderer.invoke('evidence:inspect-file', filePath)
+  },
+  crossMaterial: {
+    detect: (input) => ipcRenderer.invoke('cross-material:detect', input),
+    ask: (input) => ipcRenderer.invoke('cross-material:ask', input),
+    cancel: (requestId) => ipcRenderer.invoke('cross-material:cancel', requestId),
+    onStatus: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('cross-material:status', handler)
+      return () => ipcRenderer.removeListener('cross-material:status', handler)
+    }
+  },
   localAI: {
     status: () => ipcRenderer.invoke('localai:status'),
     download: () => ipcRenderer.invoke('localai:download'),
@@ -117,6 +153,10 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     }
   },
   mediaTools: {
+    planEdit: (input) => ipcRenderer.invoke('media:edit-plan', input),
+    planHistory: (input) => ipcRenderer.invoke('media:edit-history-plan', input),
+    navigateHistory: (input) => ipcRenderer.invoke('media:edit-history', input),
+    trim: (input) => ipcRenderer.invoke('media:trim', input),
     compress: (input) => ipcRenderer.invoke('media:compress', input),
     cancel: (requestId) => ipcRenderer.invoke('media:task-cancel', requestId)
   },

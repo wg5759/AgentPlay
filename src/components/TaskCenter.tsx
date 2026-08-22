@@ -1,10 +1,12 @@
 import { useMemo } from 'react'
 import { useAgentStore, type AgentTask } from '../stores/agentStore'
 import UiIcon from './UiIcon'
+import { taskTimingForTask } from '../workspace-journey-policy.mjs'
 
 interface Props {
   onClose: () => void
   onRetry: (task: AgentTask) => void
+  onContinue: (task: AgentTask) => void
   onCancel: () => void
   cancellableTaskId: string
 }
@@ -21,7 +23,7 @@ const PHASE_LABEL: Record<AgentTask['phase'], string> = {
 
 const ACTIVE_PHASES = new Set<AgentTask['phase']>(['queued', 'running', 'waiting'])
 
-export default function TaskCenter({ onClose, onRetry, onCancel, cancellableTaskId }: Props) {
+export default function TaskCenter({ onClose, onRetry, onContinue, onCancel, cancellableTaskId }: Props) {
   const tasks = useAgentStore((state) => state.tasks)
   const activeTaskId = useAgentStore((state) => state.activeTaskId)
   const selectTask = useAgentStore((state) => state.selectTask)
@@ -42,7 +44,7 @@ export default function TaskCenter({ onClose, onRetry, onCancel, cancellableTask
         </div>
         {(task.instruction || task.source) && <p className="task-center-input" title={task.source}>{task.instruction || task.source}</p>}
         {task.phase === 'running' && (
-          <div className="task-center-progress"><i style={{ width: `${task.progress ?? 30}%` }} className={task.progress == null ? 'is-indeterminate' : ''} /><span>{task.status || '正在处理…'}</span></div>
+          <><div className="task-center-progress"><i style={task.progress == null ? undefined : { width: `${task.progress}%` }} className={task.progress == null ? 'is-indeterminate' : ''} /><span>{task.status || '正在处理…'}</span></div><small className="task-center-timing">{taskTimingForTask(task)}</small></>
         )}
         {task.steps.length > 0 && (
           <ol className="task-center-steps" aria-label="任务执行步骤">
@@ -60,6 +62,9 @@ export default function TaskCenter({ onClose, onRetry, onCancel, cancellableTask
             {task.budget && <span>工具 {task.budget.toolCalls}/{task.budget.maxToolCalls} · {Math.ceil(task.budget.elapsedMs / 1000)} 秒</span>}
           </div>
         )}
+        {task.evidence.length > 0 && <ul className="task-center-evidence" aria-label="成果证据">
+          {task.evidence.slice(0, 4).map((item) => <li key={item.id} title={item.value}><i className={item.verified ? 'is-verified' : ''} /><strong>{item.label}</strong><span>{item.value}</span></li>)}
+        </ul>}
         {task.quality && (
           <div className={`task-center-quality is-${task.quality.level}`}>
             <div><strong>质量评分 {task.quality.score}</strong><span>交付线 {task.quality.threshold}</span></div>
@@ -85,9 +90,10 @@ export default function TaskCenter({ onClose, onRetry, onCancel, cancellableTask
             ))}
           </div>
         )}
-        {(retryable || (task.phase === 'running' && task.id === cancellableTaskId)) && (
+        {(retryable || (task.phase === 'completed' && task.outputs.length > 0) || (task.phase === 'running' && task.id === cancellableTaskId)) && (
           <div className="task-center-actions">
             {retryable && <button type="button" onClick={(event) => { event.stopPropagation(); onRetry(task) }}>再次执行</button>}
+            {task.phase === 'completed' && task.outputs.length > 0 && <button type="button" onClick={(event) => { event.stopPropagation(); onContinue(task) }}>继续修改</button>}
             {task.phase === 'running' && task.id === cancellableTaskId && <button type="button" className="is-danger" onClick={(event) => { event.stopPropagation(); onCancel() }}>取消任务</button>}
           </div>
         )}

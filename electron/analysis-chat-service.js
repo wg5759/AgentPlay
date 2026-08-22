@@ -145,7 +145,7 @@ function assertAnalyzableVideo(sourcePath) {
 async function runChatAnalysis({
   sourcePath, mediaName, duration, instruction = '', outputFormat = 'auto',
   cloudApproved = false, signal, onStatus = () => {}, workspace, complete, completeVisionMulti, frames,
-  translateToChinese, model = {}, onCheckpoint
+  translateToChinese, model = {}, onCheckpoint, resumeCheckpoint, outputDir
 }) {
   const resolved = assertAnalyzableVideo(sourcePath)
   const format = outputFormat && outputFormat !== 'auto' ? outputFormat : resolveAnalysisOutput(instruction)
@@ -187,8 +187,22 @@ async function runChatAnalysis({
   let reportFrames = []
   let semanticQuality = null
   const domainRepairHistory = []
+  const resumedDraft = resumeCheckpoint?.analysisDraft && typeof resumeCheckpoint.analysisDraft === 'object'
+    ? resumeCheckpoint.analysisDraft
+    : null
+  if (resumedDraft) {
+    aiText = String(resumedDraft.aiText || '')
+    frameCount = Math.max(0, Number(resumedDraft.frameCount) || 0)
+    visionNote = String(resumedDraft.visionNote || '')
+    analysisNote = String(resumedDraft.analysisNote || '')
+    semanticQuality = resumedDraft.semanticQuality || null
+    if (Array.isArray(resumedDraft.domainRepairHistory)) domainRepairHistory.push(...resumedDraft.domainRepairHistory.slice(-4))
+    onStatus('已从检查点恢复模型分析结果，不重复调用模型')
+  }
   const underpoweredLocal = isUnderpoweredLocalAnalysisModel(model)
-  if (underpoweredLocal) {
+  if (resumedDraft) {
+    // 模型结果已经持久化；后续只做本地证据恢复和确定性写出。
+  } else if (underpoweredLocal) {
     analysisNote = `内置轻量模型 ${model.model || ''} 不具备可靠深度拉片能力，已阻止其生成伪分析`
     onStatus(`${analysisNote}；改用证据化中文拆解`)
   } else if (model.configured) {
@@ -241,7 +255,7 @@ async function runChatAnalysis({
       aiText = result.text
     }
   }
-  if (aiText) {
+  if (aiText && !resumedDraft) {
     let quality = evaluateProfessionalAnalysisQuality(aiText, { duration, hasVisualEvidence: frameCount > 0 })
     semanticQuality = quality
     if (!quality.ok && typeof complete === 'function') {
@@ -284,9 +298,24 @@ async function runChatAnalysis({
       frameCount = 0
       reportFrames = []
     }
-  } else if (!analysisNote) {
+  } else if (!resumedDraft && !analysisNote) {
     analysisNote = model.configured ? '模型没有返回可用内容' : '未配置可用的深度分析模型'
   }
+  if (resumedDraft && frameCount > 0 && frames) {
+    let shots = []
+    try {
+      onStatus('正在从本地媒体恢复报告关键帧')
+      shots = await frames.extract({ sourcePath: resolved, durationSec: duration, outDir: path.join(os.tmpdir(), `agentplay-frames-resume-${Date.now()}`), signal })
+      reportFrames = shots.slice(0, frameCount).map((shot) => ({ label: shot.label, data: fs.readFileSync(shot.path) }))
+      frameCount = reportFrames.length
+    } finally {
+      try { if (shots[0]?.path) fs.rmSync(path.dirname(shots[0].path), { recursive: true, force: true }) } catch { /* 忽略 */ }
+    }
+  }
+  onCheckpoint?.({
+    stage: 'analysis-model-complete',
+    analysisDraft: { aiText, frameCount, visionNote, analysisNote, semanticQuality, domainRepairHistory }
+  })
   onStatus('正在写出解剖报告')
   const summary = aiText
     ? frameCount
@@ -295,7 +324,8 @@ async function runChatAnalysis({
     : `已生成《${displayName}》证据化中文拆解（${context.cues.length} 条字幕证据；未交付低质量模型结果）`
   const plan = {
     kind: 'video-analysis', instruction, summary, outputFormat: format,
-    files: [{ name: displayName, path: resolved, ext: path.extname(resolved).toLowerCase() }]
+    files: [{ name: displayName, path: resolved, ext: path.extname(resolved).toLowerCase() }],
+    ...(outputDir ? { outputDir: path.resolve(outputDir) } : {})
   }
   const aiPlan = {
     title: `${displayName}·深度解剖`, summary, outputFormat: format,

@@ -167,3 +167,25 @@ test('aborting a media encode kills the ffmpeg child and rejects promptly', asyn
   await assert.rejects(pending, /已取消/)
   assert.equal(child.killed, true)
 })
+
+test('audio probing distinguishes a real audio stream from a silent video', async () => {
+  const { EventEmitter } = require('events')
+  const calls = []
+  const spawnImpl = (_file, args) => {
+    calls.push(args)
+    const child = new EventEmitter()
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.kill = () => {}
+    process.nextTick(() => {
+      if (args.at(-1) === 'with-audio.mp4') child.stdout.emit('data', Buffer.from('1\n'))
+      child.emit('exit', 0)
+    })
+    return child
+  }
+  const service = new VideoFrameService({ ffprobePath: process.execPath, spawnImpl })
+
+  assert.equal(await service.probeHasAudio('with-audio.mp4'), true)
+  assert.equal(await service.probeHasAudio('silent.mp4'), false)
+  assert.ok(calls.every((args) => args.includes('a:0') && args.includes('stream=index')))
+})

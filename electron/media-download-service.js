@@ -161,5 +161,6 @@ module.exports = {
   extractUrl,
   isDownloadIntent,
   isMediaUrl,
-  isVideoSiteUrl
+  isVideoSiteUrl,
+  assertUrlAllowed
 }

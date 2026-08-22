@@ -37,6 +37,7 @@ function modelKey(config = {}) {
 function taskKindForPersistentType(type) {
   if (type === 'document.run') return 'document'
   if (type === 'analysis.run') return 'analysis'
+  if (type === 'project.evidence-qa') return 'cross-material-qa'
   if (type === 'subtitle.generate') return 'subtitle-translation'
   if (type === 'creative.video-generate') return 'creative-video'
   if (type === 'creative.recut-short') return 'creative-planning'

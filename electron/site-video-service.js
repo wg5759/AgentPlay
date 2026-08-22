@@ -25,6 +25,15 @@ function assertHttpUrl(value) {
   return text
 }
 
+// 微信视频号（weixin.qq.com/sph、channels.weixin.qq.com）识别与合规引导。
+// 实测（2026-08-18，yt-dlp 2026.07.04）：报 Unsupported URL（上游 issue #17162 仍 open）；
+// 分享页是无登录态渲染不出任何内容的 JS 空壳，播放地址需微信登录态签名下发且流加密。
+// 本应用红线：不装根证书做 MITM、不绕过平台技术保护。给出可行动替代路径，而不是一句 Unsupported URL。
+function weixinChannelsGuidance(url) {
+  if (!/(?:weixin\.qq\.com\/sph|channels\.weixin\.qq\.com)/i.test(String(url || ''))) return ''
+  return '这是微信视频号链接：视频号没有公开解析接口（yt-dlp 不支持），播放地址要微信登录态且视频流经平台加密，本应用不绕过这些保护，所以无法直接下载。可行路径：① 自己的作品→电脑登录「视频号助手」创作者后台官方下载；② 联系作者要原文件；③ 用第三方工具自行取得（自行承担版权责任）后拖进本应用播放、剪辑、转写、翻译。腾讯视频（v.qq.com）的链接可以直接下载。'
+}
+
 // 短链域名 → cookies 文件主域（导入的 cookies.txt 按主域命名存放）
 const SITE_ALIASES = {
   'b23.tv': 'bilibili.com',
@@ -256,6 +265,8 @@ class SiteVideoService {
 
   async resolve(url, { signal, onRetryNote } = {}) {
     const target = assertHttpUrl(url)
+    const guidance = weixinChannelsGuidance(target)
+    if (guidance) throw new Error(guidance)
     if (!this.availability().available) throw new Error('站点视频解析组件未下载')
     const extractorArgs = extractorArgsForUrl(target)
     const { stdout } = await this.attemptWithCookies(
@@ -280,6 +291,8 @@ class SiteVideoService {
 
   async download(url, { destDir, onProgress, signal, onRetryNote } = {}) {
     const target = assertHttpUrl(url)
+    const guidance = weixinChannelsGuidance(target)
+    if (guidance) throw new Error(guidance)
     const status = this.availability()
     if (!status.available) throw new Error(status.reason)
     fs.mkdirSync(destDir, { recursive: true })
@@ -347,5 +360,6 @@ module.exports = {
   normalizeCookiesText,
   stripHashFromName,
   decodeConsole,
-  extractorArgsForUrl
+  extractorArgsForUrl,
+  weixinChannelsGuidance
 }

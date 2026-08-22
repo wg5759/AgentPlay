@@ -17,6 +17,8 @@ import useMediaCreativeTasks from './agent-panel/useMediaCreativeTasks'
 import useVoiceInput from './agent-panel/useVoiceInput'
 import useIncomingFiles from './agent-panel/useIncomingFiles'
 import usePersistentTaskRuntime from './agent-panel/usePersistentTaskRuntime'
+import useContinueTask from './agent-panel/useContinueTask'
+import useCrossMaterialQaTasks from './agent-panel/useCrossMaterialQaTasks'
 import { selectDocumentPreviewPath, selectPrimaryPreviewPath } from '../document-preview-routing.mjs'
 export default function AgentPanel() {
   const { messages, inputText, setInputText, send, cancel, thinking, listening, toggleListening, setListening, addMessage } =
@@ -39,6 +41,7 @@ export default function AgentPanel() {
   const updateTask = useAgentStore((s) => s.updateTask)
   const startTask = useAgentStore((s) => s.startTask)
   const tasks = useAgentStore((s) => s.tasks)
+  const selectTask = useAgentStore((s) => s.selectTask)
   const executionTaskIdRef = useRef('')
   const docRequestIdRef = useRef('')
   usePersistentTaskRuntime(docRequestIdRef)
@@ -56,7 +59,7 @@ export default function AgentPanel() {
     let evidence = patch.evidence || current?.evidence || []
     if (outputs.length > 0 && window.aiPlayer?.system?.verifyPaths) {
       const receipts = await window.aiPlayer.system.verifyPaths(outputs)
-      evidence = outputs.map((output, index) => {
+      const outputEvidence = outputs.map((output, index) => {
         const receipt = receipts.find((item) => item.path === output)
         return {
           id: `file-${Date.now()}-${index + 1}`,
@@ -68,6 +71,9 @@ export default function AgentPanel() {
           ...(typeof receipt?.bytes === 'number' ? { bytes: receipt.bytes } : {})
         }
       })
+      evidence = [...evidence, ...outputEvidence].filter((item, index, items) => (
+        items.findIndex((candidate) => candidate.kind === item.kind && candidate.value === item.value) === index
+      ))
     }
     const latest = useAgentStore.getState().tasks.find((item) => item.id === taskId)
     if (latest?.phase === 'cancelled') return
@@ -75,10 +81,10 @@ export default function AgentPanel() {
     if (taskId) updateTask(taskId, completed)
     else setActiveTask(completed)
   }
-  const failExecutionTask = (error: string) => {
+  const failExecutionTask = (error: string, patch: Partial<AgentTask> = {}) => {
     const current = useAgentStore.getState().tasks.find((item) => item.id === executionTaskIdRef.current)
     if (current?.phase === 'cancelled') return
-    mutateTask({ phase: 'failed', running: false, status: '', outputs: [], error })
+    mutateTask({ ...patch, phase: 'failed', running: false, status: '', outputs: patch.outputs || [], error })
   }
   const executionWasCancelled = () => useAgentStore.getState().tasks
     .some((item) => item.id === executionTaskIdRef.current && item.phase === 'cancelled')
@@ -229,10 +235,12 @@ export default function AgentPanel() {
     runDocumentTask: runDocTask,
     resumeLocalDocumentTask,
     runAnalysisTask,
+    runOutcomeWorkflow,
     setAnalysisFormat,
     resumePendingTask: resumeDocumentAnalysis,
     retryActiveTask: retryActiveDocumentAnalysis,
-    retryStoredAnalysisTask
+    retryStoredAnalysisTask,
+    retryStoredOutcomeTask
   } = useDocumentAnalysisTasks({
     busyRef: docBusyRef,
     requestIdRef: docRequestIdRef,
@@ -264,11 +272,20 @@ export default function AgentPanel() {
   runDocTaskRef.current = runDocTask
   runAnalysisTaskRef.current = runAnalysisTask
 
+  const { runCrossMaterialQuestion, resumeCrossMaterialQuestion, retryActiveCrossMaterialQuestion } = useCrossMaterialQaTasks({
+    busyRef: docBusyRef, requestIdRef: docRequestIdRef, executionTaskIdRef, pendingTaskRef, startTask, mutateTask,
+    setTaskBusy: setDocBusy, setTaskStatus: setDocStatus, bindCancelableRequest, releaseCancelableRequest,
+    completeExecutionTask, failExecutionTask, executionWasCancelled, addMessage, setInputText, attachments,
+    cloudApproved, requestCloudApproval: () => setNeedsApproval(true), clearCloudApproval: () => { setNeedsApproval(false); setCloudApproved(false) }
+  })
+
   const {
     isVideoGenerationIntent,
     runRecutShort,
     runVideoGenTask,
     runBatchTask,
+    runEditHistoryTask,
+    runTrimTask,
     runCompressTask,
     runDedupTask,
     retryActiveTask: retryActiveMediaCreative,
@@ -295,8 +312,8 @@ export default function AgentPanel() {
 
   const routeTextSend = createIntentRouter({
     inputText, attachments, agentMode, addMessage, setInputText, setLinkChoice,
-    isVideoGenerationIntent, runBatchTask, runVideoGenTask,
-    runCompressTask, runDedupTask, runDocumentTask: runDocTask, setAnalysisFormat,
+    isVideoGenerationIntent, runBatchTask, runCrossMaterialQuestion, runVideoGenTask, runEditHistoryTask, runTrimTask,
+    runCompressTask, runDedupTask, runDocumentTask: runDocTask, runOutcomeWorkflow, setAnalysisFormat,
     runAnalysisTask, send
   })
   routeTextSendRef.current = routeTextSend
@@ -335,9 +352,11 @@ export default function AgentPanel() {
     pendingTaskRef, requestIdRef: docRequestIdRef, cancellableTaskId,
     closeTaskCenter: () => setShowTaskCenter(false), updateTask, mutateTask,
     addMessage, releaseCancelableRequest, runDownloadTask, runLinkAnalysisTask,
-    retryStoredAnalysisTask, retryStoredMediaCreative, retryActiveLinkTask,
-    retryActiveDocumentAnalysis, retryActiveMediaCreative
+    retryStoredAnalysisTask, retryStoredOutcomeTask, retryStoredMediaCreative, retryActiveLinkTask,
+    retryActiveDocumentAnalysis, retryActiveCrossMaterialQuestion, retryActiveMediaCreative
   })
+
+  const continueFromTask = useContinueTask({ selectTask, closeTaskCenter: () => setShowTaskCenter(false), setAttachments, setInputText, inputRef })
 
   const handleSend = () => {
     void routeTextSend()
@@ -382,7 +401,7 @@ export default function AgentPanel() {
           onAgentModeChange={setAgentMode}
         />
         {showTaskCenter && (
-          <TaskCenter onClose={() => setShowTaskCenter(false)} onRetry={retryStoredTask} onCancel={() => void cancelActiveTask()} cancellableTaskId={cancellableTaskId} />
+          <TaskCenter onClose={() => setShowTaskCenter(false)} onRetry={retryStoredTask} onContinue={(selectedTask) => void continueFromTask(selectedTask)} onCancel={() => void cancelActiveTask()} cancellableTaskId={cancellableTaskId} />
         )}
         {attachments.length > 0 && (
           <div className="px-4 py-2 border-b border-white/10 flex flex-wrap items-center gap-2">
@@ -452,10 +471,10 @@ export default function AgentPanel() {
           <div className="flex items-center gap-2 border-b border-amber-400/20 bg-amber-400/[0.06] px-4 py-2 text-xs text-amber-100">
             <label className="flex flex-1 cursor-pointer items-center gap-2">
               <input type="checkbox" checked={cloudApproved} onChange={(event) => setCloudApproved(event.target.checked)} />
-              允许把本次任务内容发送给云端大上下文模型；不勾选则保留附件并可继续使用本地分段处理
+              {pendingTaskRef.current === 'cross-qa' && executionTask.status ? executionTask.status : '允许把本次任务内容发送给云端大上下文模型；不勾选则保留附件并可继续使用本地分段处理'}
             </label>
             {pendingTaskRef.current === 'doc' && <button disabled={docBusy} onClick={() => { setNeedsApproval(false); setCloudApproved(false); void resumeLocalDocumentTask() }} className="rounded bg-white/10 px-3 py-1 text-white disabled:opacity-40">本地分段</button>}
-            <button disabled={!cloudApproved || docBusy} onClick={() => { setNeedsApproval(false); if (pendingTaskRef.current === 'link-analysis') void resumeLinkAnalysis(); else void resumeDocumentAnalysis() }} className="rounded bg-amber-600 px-3 py-1 text-white disabled:opacity-40">允许云端并继续</button>
+            <button disabled={!cloudApproved || docBusy} onClick={() => { setNeedsApproval(false); if (pendingTaskRef.current === 'link-analysis') void resumeLinkAnalysis(); else if (pendingTaskRef.current === 'cross-qa') void resumeCrossMaterialQuestion(); else void resumeDocumentAnalysis() }} className="rounded bg-amber-600 px-3 py-1 text-white disabled:opacity-40">允许云端并继续</button>
           </div>
         )}
 
