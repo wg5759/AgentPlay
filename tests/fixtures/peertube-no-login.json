@@ -1,0 +1,23 @@
+{
+  "id": "peertube-no-login",
+  "title": "PeerTube V6: storyboard",
+  "url": "https://framatube.org/w/ff2EVqgHrQX5WJyJJc7Uax",
+  "legacyUrl": "https://framatube.org/videos/watch/73556243-7a9b-496c-a740-f80e42ee0ad9",
+  "embedUrl": "https://framatube.org/videos/embed/73556243-7a9b-496c-a740-f80e42ee0ad9",
+  "instance": "framatube.org",
+  "shortId": "ff2EVqgHrQX5WJyJJc7Uax",
+  "uuid": "73556243-7a9b-496c-a740-f80e42ee0ad9",
+  "durationSec": 9,
+  "privacy": "Public",
+  "loginRequired": false,
+  "uploader": "Framasoft",
+  "permission": "Public no-login PeerTube watch page on Framasoft official Framatube instance. Framasoft publishes this short PeerTube V6 feature clip for public viewing; reuse is limited to automated download/regression testing of the yt-dlp PeerTube path. Do not commit cookies or bypass private/paywalled hosts.",
+  "permissionSource": "https://framatube.org/w/ff2EVqgHrQX5WJyJJc7Uax",
+  "missingFixtureHint": "PeerTube public no-login fixture unreachable (framatube.org /w/ff2EVqgHrQX5WJyJJc7Uax). Check network access to framatube.org or update tests/fixtures/peertube-no-login.json if Framasoft moved the clip.",
+  "notes": [
+    "Standard PeerTube short watch URL form: https://<instance>/w/<shortId>",
+    "Classic form also accepted: /videos/watch/<uuid> and /videos/embed/<uuid>",
+    "Route choices remain Download only and Download + analyze; engine is existing yt-dlp SiteVideoService",
+    "Private, password, or login-gated PeerTube hosts must still fail honestly without committed credentials"
+  ]
+}

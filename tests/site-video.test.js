@@ -7,6 +7,8 @@ const { agentPanelSource } = require('./helpers/agent-panel-source')
 
 const { SiteVideoService, parseProgressLine, sanitizeTitle, cookiesFileForUrl, detectCookiesDomain, normalizeCookiesText, stripHashFromName, extractorArgsForUrl, weixinChannelsGuidance } = require('../electron/site-video-service')
 const YTDLP_PACK = require('../electron/ytdlp-pack-manifest')
+const peertubeFixture = require('./fixtures/peertube-no-login.json')
+const { isPeerTubeUrl, isVideoSiteUrl } = require('../electron/media-download-service')
 
 function fakeSpawn(responder) {
   const { EventEmitter } = require('events')
@@ -291,6 +293,81 @@ test('re-download of an already-fetched video reuses the existing file instead o
   assert.equal(result.bytes, 50)
 })
 
+
+test('PeerTube no-login fixture: progress, cancellation, duplicate reuse and honest private failure', async () => {
+  assert.equal(isPeerTubeUrl(peertubeFixture.url), true)
+  assert.equal(isVideoSiteUrl(peertubeFixture.url), true)
+  assert.equal(peertubeFixture.loginRequired, false)
+  assert.match(String(peertubeFixture.permission || ''), /Public|no-login|Framasoft/i)
+
+  const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'peertube-dl-'))
+  const produced = path.join(destDir, 'PeerTube-storyboard-' + peertubeFixture.shortId + '.mp4')
+  const progresses = []
+  const ok = new SiteVideoService({
+    enginePath: process.execPath,
+    spawnImpl: fakeSpawn(({ child }) => {
+      child.stdout.emit('data', Buffer.from('[download]  12.5% of 1.00MiB at 500.00KiB/s\n'))
+      child.stdout.emit('data', Buffer.from('[download] 100% of 1.00MiB\n'))
+      child.stdout.emit('data', Buffer.from(produced + '\n'))
+      fs.writeFileSync(produced, Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x00, 0x00, 0x6d, 0x70, 0x34, 0x32]))
+      child.emit('exit', 0)
+    })
+  })
+  const first = await ok.download(peertubeFixture.url, { destDir, onProgress: (p) => progresses.push(p) })
+  assert.equal(first.outputPath, produced)
+  assert.ok(first.bytes > 0)
+  assert.equal(first.sourceUrl, peertubeFixture.url)
+  assert.deepEqual(progresses[0], { percent: 12.5, size: '1.00MiB' })
+  const head = fs.readFileSync(first.outputPath).subarray(4, 8).toString('ascii')
+  assert.equal(head, 'ftyp', 'downloaded container must look like ISO BMFF/mp4')
+
+  const old = new Date(Date.now() - 60 * 60 * 1000)
+  fs.utimesSync(produced, old, old)
+  const reuse = new SiteVideoService({
+    enginePath: process.execPath,
+    spawnImpl: fakeSpawn(({ child }) => {
+      child.stdout.emit('data', Buffer.from('[download] ' + produced + ' has already been downloaded\n'))
+      child.emit('exit', 0)
+    })
+  })
+  const second = await reuse.download(peertubeFixture.url, { destDir })
+  assert.equal(second.outputPath, produced)
+  assert.equal(second.bytes, first.bytes)
+  assert.equal(second.sourceUrl, peertubeFixture.url)
+
+  const controller = new AbortController()
+  const cancelling = new SiteVideoService({
+    enginePath: process.execPath,
+    spawnImpl: fakeSpawn(({ child }) => {
+      child.kill = () => {
+        child.stderr.emit('data', Buffer.from('ERROR: cancelled'))
+        child.emit('exit', 1)
+      }
+      setTimeout(() => controller.abort(), 5)
+    })
+  })
+  await assert.rejects(
+    cancelling.download(peertubeFixture.url, { destDir: fs.mkdtempSync(path.join(os.tmpdir(), 'peertube-cancel-')), signal: controller.signal }),
+    /已取消|cancelled/i
+  )
+
+  const gated = new SiteVideoService({
+    enginePath: process.execPath,
+    cookiesDir: fs.mkdtempSync(path.join(os.tmpdir(), 'peertube-cookies-')),
+    spawnImpl: fakeSpawn(({ child }) => {
+      child.stderr.emit('data', Buffer.from('ERROR: [PeerTube] This video is not available because it is private or requires login'))
+      child.emit('exit', 1)
+    })
+  })
+  await assert.rejects(
+    gated.download('https://framatube.org/w/PrivateVideoId01', { destDir }),
+    /需要登录态|扫码登录|private|login/i
+  )
+  assert.equal(fs.existsSync(path.join(__dirname, '..', 'cookies.txt')), false)
+  const leaked = fs.readdirSync(path.join(__dirname, '..')).filter((name) => /cookie/i.test(name))
+  assert.deepEqual(leaked, [], 'no cookie files committed at repo root')
+})
+
 test('yt-dlp GBK console output with Chinese path decodes to the real file', async () => {
   const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'site-dl-'))
   const produced = path.join(destDir, '视频-BV1.mp4')
@@ -345,6 +422,20 @@ test('site video wiring: auto component download, chat route and model center ca
 test('X is a supported video site', () => {
   const hosts = fs.readFileSync(path.join(__dirname, '..', 'electron', 'media-download-service.js'), 'utf8')
   assert.match(hosts, /'x\.com', 'twitter\.com'/)
+})
+
+
+test('PeerTube is a supported video site with documented no-login fixture', () => {
+  const hosts = fs.readFileSync(path.join(__dirname, '..', 'electron', 'media-download-service.js'), 'utf8')
+  assert.match(hosts, /isPeerTubeUrl/)
+  assert.match(hosts, /framatube\.org/)
+  assert.match(hosts, /PEERTUBE_SHORT_PATH/)
+  assert.equal(isPeerTubeUrl(peertubeFixture.url), true)
+  assert.ok(fs.existsSync(path.join(__dirname, 'fixtures', 'peertube-no-login.json')))
+  const panel = agentPanelSource()
+  assert.match(panel, /仅下载/)
+  assert.match(panel, /下载并拉片|canAnalyze/)
+  assert.match(panel, /runDownloadTaskRef\.current\(choice\.url, '', choice\.direct\)/)
 })
 
 test('network flaky errors retry in place, cookies errors still escalate, friendly guide on final network failure', () => {
