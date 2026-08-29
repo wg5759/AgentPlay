@@ -74,7 +74,7 @@ export default function Sidebar({ pinned, onTogglePin, onOpenLibrary, onOpenMode
           closePanels()
           useAgentStore.getState().openPanel()
         }, !recentOpen && !drawerOpen)}
-        {railButton('history', '最近任务', () => {
+        {railButton('history', '最近记录', () => {
           setRecentOpen((value) => !value)
           setDrawerOpen(false)
         }, recentOpen)}
@@ -88,13 +88,14 @@ export default function Sidebar({ pinned, onTogglePin, onOpenLibrary, onOpenMode
       </div>
 
       {recentOpen && (
-        <section className="workspace-flyout workspace-recent-flyout" aria-label="最近任务">
+        <section className="workspace-flyout workspace-recent-flyout" aria-label="最近记录">
           <div className="workspace-flyout-heading">
-            <div><p className="workspace-eyebrow">后台队列</p><h2>继续任务或打开结果</h2></div>
-            <button type="button" onClick={() => setRecentOpen(false)} aria-label="关闭最近任务"><UiIcon name="close" size={17} /></button>
+            <div><p className="workspace-eyebrow">最近记录</p><h2>继续任务或重新播放</h2></div>
+            <button type="button" onClick={() => setRecentOpen(false)} aria-label="关闭最近记录"><UiIcon name="close" size={17} /></button>
           </div>
           <div className="workspace-recent-list">
             {tasks.length === 0 && recentMedia.length === 0 && <div className="workspace-empty-note"><UiIcon name="history" size={20} /><span>还没有任务或播放记录</span></div>}
+            {tasks.length > 0 && <p className="workspace-recent-divider">任务记录 · {Math.min(tasks.length, 10)}</p>}
             {tasks.slice(0, 10).map((task) => (
               <button type="button" key={task.id} onClick={() => { selectTask(task.id); useAgentStore.getState().openPanel(); window.dispatchEvent(new CustomEvent('agentplay-open-task-center')); closePanels() }} title={task.source || task.instruction} className={'workspace-recent-item workspace-task-item workspace-task-item-' + task.phase}>
                 <span className="workspace-recent-icon"><UiIcon name={task.kind === 'analysis' || task.kind === 'link-analysis' ? 'analysis' : task.kind === 'download' || task.kind === 'media' ? 'video' : 'report'} size={16} /></span>
@@ -104,8 +105,8 @@ export default function Sidebar({ pinned, onTogglePin, onOpenLibrary, onOpenMode
                 </span>
               </button>
             ))}
-            {recentMedia.length > 0 && <p className="workspace-recent-divider">最近打开</p>}
-            {recentMedia.slice(0, tasks.length > 0 ? 4 : 10).map((item) => (
+            {recentMedia.length > 0 && <p className="workspace-recent-divider">播放记录 · {recentMedia.length}</p>}
+            {recentMedia.map((item) => (
               <button type="button" key={item.src} onClick={() => { usePlayerStore.getState().setMedia(item.name, item.src); closePanels() }} title={item.src} className="workspace-recent-item">
                 <span className="workspace-recent-icon"><UiIcon name="video" size={16} /></span>
                 <span className="min-w-0 flex-1"><strong>{item.name}</strong><small>{new Date(item.openedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></span>

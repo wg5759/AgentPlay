@@ -54,10 +54,10 @@ test('analysis still opens the unified chat flow, and the home uses one intent e
 })
 
 test('recent work and adaptive focus mode replace the old resizable three-pane console', () => {
-  assert.match(sidebar, /继续任务或打开结果/)
+  assert.match(sidebar, /继续任务或重新播放/)
   assert.match(sidebar, /tasks\.slice\(0, 10\)\.map/)
   assert.match(sidebar, /agentplay-open-task-center/)
-  assert.match(sidebar, /recentMedia\.slice\(0, tasks\.length > 0 \? 4 : 10\)\.map/)
+  assert.match(sidebar, /recentMedia\.map/)
   assert.match(sidebar, /setMedia\(item\.name, item\.src\)/)
   assert.ok(!library.includes('RecentStrip'), '媒体库内的 RecentStrip 应已移除')
   assert.match(workbench, /workspace-home-main/)

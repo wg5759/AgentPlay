@@ -50,6 +50,9 @@ declare module '*.mjs' {
     media: string[] | null | undefined,
     documents: Array<{ previewPath?: string }> | null | undefined
   ): string | null
+  export interface RecentMediaRecord { name: string; src: string; openedAt: number }
+  export function normalizeRecentMedia(value: unknown, limit?: number): RecentMediaRecord[]
+  export function recordRecentMedia(current: unknown, item: Partial<RecentMediaRecord>, limit?: number): RecentMediaRecord[]
 }
 
 // 桌面端 Electron 注入的全局 API 类型声明

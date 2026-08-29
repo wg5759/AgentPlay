@@ -863,7 +863,12 @@ export default function PlayerView({ onBack }: Props) {
       return
     }
     if (isDesktop) {
-      usePlayerStore.getState().setMedia(file.name, (file as File & { path: string }).path)
+      const filePath = window.aiPlayer?.files?.getPathForFile?.(file) || (file as File & { path?: string }).path || ''
+      if (!filePath) {
+        setPlaybackNotice('没有读取到文件路径，请重新从资源管理器拖入')
+        return
+      }
+      usePlayerStore.getState().setMedia(file.name, filePath)
     } else {
       const oldSrc = usePlayerStore.getState().videoSrc
       if (oldSrc && oldSrc.startsWith('blob:')) URL.revokeObjectURL(oldSrc)

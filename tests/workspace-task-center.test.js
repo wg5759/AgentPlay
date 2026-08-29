@@ -73,10 +73,11 @@ test('task center exposes progress, results, safe retry and cancellation without
   assert.match(css, /TASK CENTER V1/)
 })
 
-test('activity rail recent view resumes persisted tasks and keeps recent media as fallback', () => {
+test('activity rail recent view resumes persisted tasks and exposes the complete playback ledger', () => {
   assert.match(sidebar, /const tasks = useAgentStore/)
   assert.match(sidebar, /selectTask\(task\.id\)/)
   assert.match(sidebar, /agentplay-open-task-center/)
-  assert.match(sidebar, /继续任务或打开结果/)
-  assert.match(sidebar, /recentMedia\.slice/)
+  assert.match(sidebar, /继续任务或重新播放/)
+  assert.match(sidebar, /播放记录/)
+  assert.match(sidebar, /recentMedia\.map/)
 })
