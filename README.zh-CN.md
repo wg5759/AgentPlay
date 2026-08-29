@@ -34,7 +34,7 @@ AgentPlay 是一个面向 AI 时代的本地媒体工作台：在可靠播放的
 
 ## 下载
 
-公开稳定版仍是 `0.7.6`；最新测试通道为 [0.9.1 Preview 1](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.1)，这是未经签名、带完整校验资产的 GitHub Prerelease。
+公开稳定版仍是 `0.7.6`；最新测试通道为 [0.9.1 Preview 2](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.2)，这是未经签名、带完整校验资产的 GitHub Prerelease。
 
 - [AgentPlay 0.7.6 发布页](https://github.com/wg5759/AgentPlay/releases/tag/v0.7.6)
 - [Windows x64 标准版](https://github.com/wg5759/AgentPlay/releases/download/v0.7.6/AgentPlay-0.7.6-Windows-x64-Standard.exe)：不内置模型，SHA-256 `B6680A6AE570268D4BA81D5E74CC3DE2D626063FBADCF7387467606F7F63E8CF`
