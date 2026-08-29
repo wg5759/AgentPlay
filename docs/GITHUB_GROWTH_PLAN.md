@@ -4,7 +4,7 @@
 
 ## 执行进度（2026-08-28）
 
-- P0 完成率：**9/10**。PR #22/#24/#31/#32 已合并；0.9.1 Preview 1、双语 README、45 秒真实界面演示、三图画廊、GitHub Pages、16 个 Topics、公开维护者资料、AgentPlay 置顶和 6 个可领取 Issue 均已完成。
+- P0 完成率：**9/10**。PR #22/#24/#31/#32/#40 已合并；0.9.1 Preview 2、双语 README、45 秒真实界面演示、三图画廊、GitHub Pages、16 个 Topics、公开维护者资料、AgentPlay 置顶和 6 个可领取 Issue 均已完成。
 - 唯一未完成 P0：仓库 Social Preview 图片已生成并通过 1280×640 检查；用户截图证明 Chrome ChatGPT 扩展的文件 URL 访问早已开启，但 GitHub Settings 上传仍没有公开回读，因此继续按未完成记账，不能用本地图片或浏览器权限状态冒充仓库已展示。
 - 第一轮公开发布：GitHub Prerelease、8 资产、Draft 回读、匿名安装器/便携包哈希验收与 Discussion #30 均完成；Stable 仍由有效 Authenticode 签名硬门阻断。
 - 第二轮真实结果：Product Hunt 已通过 GitHub OAuth 建立维护者账号，AgentPlay 0.9.1 的主信息、开源仓库、缩略图、两张图库、三个标签、制造商身份与首条评论均已创建；发布清单必需项 100%，产品页为 `https://www.producthunt.com/products/agentplay-0-9-1?launch=agentplay-0-9-1`。已确认最早的 2026-08-28 太平洋时间排期并出现 launch-day 控制面板；因平台尚未日切且匿名读取受当前网络出口限制，状态为“已排期、待公开验收”，不得提前写“已上线”。Show HN 账号已由用户注册并登录，标题、GitHub 链接与技术说明填写后只提交一次，但 HN 重定向到 `/showlim`，明确限制新账号发布 Show HN；没有帖子 URL，不改成普通投稿、不重复提交绕过社区门槛。Electron 官方 `electron/apps` 条目按规范生成并通过 10,279 项 human-data 测试，但上游网页明确限制只有协作者可以创建 PR，因此没有绕过权限提交。
