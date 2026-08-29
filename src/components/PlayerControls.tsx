@@ -141,10 +141,10 @@ export default function PlayerControls({ onInteractionStart, onInteractionEnd }:
           onClick={() => {
             // 影院模式：播放区占满整个窗口（三栏收起），窗口同步全屏；再按还原
             const state = usePlayerStore.getState()
-            const next = !state.theater
+            const next = !(state.theater || state.isFullscreen)
             state.setTheater(next)
             if (window.aiPlayer?.windowControls) {
-              if (next !== state.isFullscreen) void window.aiPlayer.windowControls.setPreset('fullscreen')
+              void window.aiPlayer.windowControls.setFullscreen(next)
             } else {
               toggleFullscreen()
               if (document.fullscreenElement) document.exitFullscreen()

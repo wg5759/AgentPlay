@@ -390,14 +390,12 @@ export default function PlayerView({ onBack }: Props) {
     await window.aiPlayer?.screenshot?.save(canvas.toDataURL('image/png'), `${fileBase}-${Date.now()}.png`)
   }
 
-  // 影院模式：播放区占满整个窗口（三栏收起）+ 窗口全屏；退出则双双还原（setPreset fullscreen 是 toggle，窗口 bounds 自动恢复）
+  // 影院模式与原生全屏使用同一个明确目标值，避免异步事件把 toggle 状态翻反。
   const toggleTheaterMode = () => {
     const state = usePlayerStore.getState()
-    const next = !state.theater
+    const next = !(state.theater || state.isFullscreen)
     state.setTheater(next)
-    if (isDesktop && next !== state.isFullscreen) {
-      void window.aiPlayer?.windowControls?.setPreset('fullscreen')
-    }
+    if (isDesktop) void window.aiPlayer?.windowControls?.setFullscreen(next)
   }
 
   // 问这帧：抓取当前视频画面发给视觉模型，回答回到中栏对话
@@ -935,7 +933,8 @@ export default function PlayerView({ onBack }: Props) {
       const state = usePlayerStore.getState()
       if (!state.theater) return
       state.setTheater(false)
-      if (isDesktop && state.isFullscreen) void window.aiPlayer?.windowControls?.setPreset('fullscreen')
+      if (isDesktop) void window.aiPlayer?.windowControls?.setFullscreen(false)
+      else if (document.fullscreenElement) void document.exitFullscreen()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

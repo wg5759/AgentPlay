@@ -875,6 +875,8 @@ interface AiPlayerAPI {
   }
   windowControls?: {
     setPreset: (preset: 'original' | 'half' | 'fill' | 'fullscreen', mediaSize?: { width: number; height: number }) => Promise<boolean>
+    setFullscreen: (fullscreen: boolean) => Promise<boolean>
+    isFullscreen: () => Promise<boolean>
     setPlaybackChromeVisible: (visible: boolean) => Promise<boolean>
     isPlaybackChromeVisible: () => Promise<boolean>
     onFullscreenChanged: (cb: (fullscreen: boolean) => void) => () => void
