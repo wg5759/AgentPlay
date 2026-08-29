@@ -893,15 +893,21 @@ function sendAction(action) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('menu:action', action)
 }
 
+function setWindowFullscreen(fullscreen) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  const target = Boolean(fullscreen)
+  if (mainWindow.isFullScreen() !== target) mainWindow.setFullScreen(Boolean(fullscreen))
+  return true
+}
+
 function setWindowPreset(preset, mediaSize = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return false
   const { screen } = require('electron')
   const workArea = screen.getDisplayMatching(mainWindow.getBounds()).workArea
   if (preset === 'fullscreen') {
-    mainWindow.setFullScreen(!mainWindow.isFullScreen())
-    return true
+    return setWindowFullscreen(!mainWindow.isFullScreen())
   }
-  if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false)
+  setWindowFullscreen(false)
   if (preset === 'fill') {
     mainWindow.maximize()
     return true
@@ -2010,6 +2016,14 @@ app.whenReady().then(async () => {
     win.webContents.send('window:fullscreen-changed', false)
     win.webContents.send('mpv:remeasure')
   })
+  // Renderer focus can sit inside an input or Electron/Windows can consume Escape
+  // before the React listener runs. Native fullscreen must always have a native exit.
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape' && win.isFullScreen()) {
+      event.preventDefault()
+      win.setFullScreen(false)
+    }
+  })
 
   // IPC：渲染进程 -> mpv
   ipcMain.on('mpv:playerArea', (_e, rect) => {
@@ -2097,6 +2111,11 @@ app.whenReady().then(async () => {
     contextMenu.popup({ window: mainWindow })
   })
   ipcMain.handle('window:setPreset', (_e, preset, mediaSize) => { assertTrustedSender(_e); return setWindowPreset(preset, mediaSize) })
+  ipcMain.handle('window:setFullscreen', (_e, fullscreen) => { assertTrustedSender(_e); return setWindowFullscreen(fullscreen) })
+  ipcMain.handle('window:isFullscreen', (_e) => {
+    assertTrustedSender(_e)
+    return Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen())
+  })
   ipcMain.handle('window:setPlaybackChromeVisible', (_e, _visible) => {
     assertTrustedSender(_e)
     if (!mainWindow || mainWindow.isDestroyed()) return false

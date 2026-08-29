@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { normalizeRecentMedia, recordRecentMedia } from '../player-history.mjs'
 
 interface PlayerState {
   isPlaying: boolean
@@ -38,6 +39,8 @@ interface PlayerState {
   toggleMute: () => void
   toggleFavorite: (src: string) => void
 }
+
+type PersistedPlayerState = Pick<PlayerState, 'volume' | 'subtitleVisible' | 'subtitlePosition' | 'positions' | 'playbackRate' | 'lastAudibleVolume' | 'recentMedia' | 'favorites'>
 
 export const usePlayerStore = create<PlayerState>()(
   persist(
@@ -78,19 +81,21 @@ export const usePlayerStore = create<PlayerState>()(
       setTheater: (v) => set({ theater: v }),
       toggleSubtitle: () => set((s) => ({ subtitleVisible: !s.subtitleVisible })),
       setSubtitlePosition: (v) => set({ subtitlePosition: ['high', 'middle', 'low'].includes(v) ? v : 'low' }),
-      setMedia: (name, src) => set((s) => ({
-        mediaName: name,
-        videoSrc: src,
-        isPlaying: true,
-        currentTime: s.positions[src] || 0,
-        // A crop/stretch choice from the previous file must never hide content
-        // when a differently-shaped video is opened (especially 9:16 media).
-        pictureMode: 'fit',
-        recentMedia: [
-          { name, src, openedAt: Date.now() },
-          ...s.recentMedia.filter((item) => item.src !== src)
-        ].slice(0, 30)
-      })),
+      setMedia: (name, src) => {
+        const safeSrc = typeof src === 'string' ? src.trim() : ''
+        if (!safeSrc) return
+        const safeName = typeof name === 'string' && name.trim() ? name.trim() : safeSrc.split(/[\\/]/).pop() || safeSrc
+        set((s) => ({
+          mediaName: safeName,
+          videoSrc: safeSrc,
+          isPlaying: true,
+          currentTime: s.positions[safeSrc] || 0,
+          // A crop/stretch choice from the previous file must never hide content
+          // when a differently-shaped video is opened (especially 9:16 media).
+          pictureMode: 'fit',
+          recentMedia: recordRecentMedia(s.recentMedia, { name: safeName, src: safeSrc, openedAt: Date.now() })
+        }))
+      },
       // 关闭右栏播放区：停止当前媒体（播放记录里可随时点回）
       clearMedia: () => set({ mediaName: null, videoSrc: null, isPlaying: false, currentTime: 0 }),
       setControlsVisible: (v) => set({ controlsVisible: v }),
@@ -106,6 +111,20 @@ export const usePlayerStore = create<PlayerState>()(
     }),
     {
       name: 'ai-player-store',
+      version: 1,
+      migrate: (persisted) => {
+        const state = (persisted || {}) as Partial<PersistedPlayerState>
+        return {
+          volume: typeof state.volume === 'number' ? state.volume : 80,
+          subtitleVisible: typeof state.subtitleVisible === 'boolean' ? state.subtitleVisible : true,
+          subtitlePosition: ['high', 'middle', 'low'].includes(state.subtitlePosition || '') ? state.subtitlePosition as PlayerState['subtitlePosition'] : 'low',
+          positions: state.positions && typeof state.positions === 'object' ? state.positions : {},
+          playbackRate: typeof state.playbackRate === 'number' ? state.playbackRate : 1,
+          lastAudibleVolume: typeof state.lastAudibleVolume === 'number' ? state.lastAudibleVolume : 80,
+          recentMedia: normalizeRecentMedia(state.recentMedia),
+          favorites: Array.isArray(state.favorites) ? state.favorites.filter((item): item is string => typeof item === 'string') : []
+        }
+      },
       partialize: (s) => ({
         volume: s.volume,
         subtitleVisible: s.subtitleVisible,

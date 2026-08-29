@@ -2,7 +2,7 @@
 
 ## 1. 先确认你下载的是哪一版
 
-公开稳定版是 `0.7.6`，下载入口只认 [GitHub Releases](https://github.com/wg5759/AgentPlay/releases)。最新测试通道是 [0.9.1 Preview 1](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.1)，只提供给愿意核对 SHA-256 的测试者，并明确标注 `NotSigned`；未签名版本不会冒充稳定版。
+公开稳定版是 `0.7.6`，下载入口只认 [GitHub Releases](https://github.com/wg5759/AgentPlay/releases)。最新测试通道是 [0.9.1 Preview 2](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.2)，只提供给愿意核对 SHA-256 的测试者，并明确标注 `NotSigned`；未签名版本不会冒充稳定版。
 
 Windows 安装包尚未取得 Authenticode 签名，系统可能显示“未知发布者”。下载后请在 PowerShell 核对发布页给出的 SHA-256：
 

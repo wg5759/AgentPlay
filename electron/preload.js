@@ -305,6 +305,8 @@ contextBridge.exposeInMainWorld('aiPlayer', {
   },
   windowControls: {
     setPreset: (preset, mediaSize) => ipcRenderer.invoke('window:setPreset', preset, mediaSize),
+    setFullscreen: (fullscreen) => ipcRenderer.invoke('window:setFullscreen', fullscreen),
+    isFullscreen: () => ipcRenderer.invoke('window:isFullscreen'),
     setPlaybackChromeVisible: (visible) => ipcRenderer.invoke('window:setPlaybackChromeVisible', visible),
     isPlaybackChromeVisible: () => ipcRenderer.invoke('window:isPlaybackChromeVisible'),
     onFullscreenChanged: (cb) => {
