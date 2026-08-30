@@ -13,6 +13,9 @@ test('local playback errors distinguish a growing file from a stable broken file
   assert.equal(policy.classifyMediaPlaybackError({ localFile: true, openedStat: opened, currentStat: { size: 200, mtimeMs: 20 } }), 'growing')
   assert.equal(policy.classifyMediaPlaybackError({ localFile: true, openedStat: opened, currentStat: { size: 100, mtimeMs: 10 } }), 'stable-error')
   assert.equal(policy.classifyMediaPlaybackError({ localFile: false, openedStat: null, currentStat: null }), 'unavailable')
+  assert.equal(policy.isCurrentMediaRecovery({ recoveryToken: 4, currentToken: 4, sourcePath: 'A.mp4', currentSourcePath: 'A.mp4' }), true)
+  assert.equal(policy.isCurrentMediaRecovery({ recoveryToken: 4, currentToken: 5, sourcePath: 'A.mp4', currentSourcePath: 'A.mp4' }), false)
+  assert.equal(policy.isCurrentMediaRecovery({ recoveryToken: 4, currentToken: 4, sourcePath: 'A.mp4', currentSourcePath: 'B.mp4' }), false)
 })
 
 test('HTML5 media error never launches the external compatibility player automatically', () => {
@@ -27,6 +30,15 @@ test('HTML5 media error never launches the external compatibility player automat
   assert.match(view, /视频文件仍在生成，完成后会自动重试/)
   assert.match(view, /文件可能未完成或码流损坏/)
   assert.match(view, /onLoadedMetadata[\s\S]{0,500}openedMediaStatRef\.current = stat/)
+  assert.match(errorBlock, /const sourcePath = videoSrc[\s\S]*const recoveryToken = mediaRecoveryTokenRef\.current[\s\S]*await readLocalMediaStat\(sourcePath\)[\s\S]*isCurrentMediaRecovery/)
+  assert.match(errorBlock, /waitForLocalMediaStable\(sourcePath, currentStat\)/)
+  const reloadStart = view.indexOf('const reloadHtml5Playback')
+  const reloadEnd = view.indexOf('const waitForLocalMediaStable', reloadStart)
+  const reloadBlock = view.slice(reloadStart, reloadEnd)
+  assert.match(reloadBlock, /pendingReloadCleanupRef\.current\?\.\(\)/)
+  assert.match(reloadBlock, /const onLoadedMetadata[\s\S]*isCurrentMediaRecovery/)
+  assert.match(reloadBlock, /removeEventListener\('loadedmetadata', onLoadedMetadata\)/)
+  assert.match(view, /return \(\) => \{[\s\S]{0,200}pendingReloadCleanupRef\.current\?\.\(\)/)
 })
 
 test('desktop bridge exposes authorized file stat for playback recovery', () => {

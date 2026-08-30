@@ -4,7 +4,7 @@ import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 import { PLAYER_CHROME_HIDE_DELAY_MS, isRealMouseActivity, shouldAutoHideControls } from '../player-ui-policy.mjs'
 import { subtitleCueSettings, subtitleLinePercent } from '../subtitle-display-policy.mjs'
-import { classifyMediaPlaybackError, sameMediaFileStat } from '../player-media-error-policy.mjs'
+import { classifyMediaPlaybackError, isCurrentMediaRecovery, sameMediaFileStat } from '../player-media-error-policy.mjs'
 
 interface Props {
   onBack: () => void
@@ -101,6 +101,7 @@ export default function PlayerView({ onBack }: Props) {
   const [playbackRecovery, setPlaybackRecovery] = useState<'none' | 'waiting' | 'error' | 'compatibility'>('none')
   const openedMediaStatRef = useRef<MediaFileStat | null>(null)
   const mediaRecoveryTokenRef = useRef(0)
+  const pendingReloadCleanupRef = useRef<(() => void) | null>(null)
   const [subtitleResults, setSubtitleResults] = useState<Array<{ fileId: number; fileName: string; language: string; release: string }>>([])
   const [subtitleStatus, setSubtitleStatus] = useState('')
   const [subtitleRecovery, setSubtitleRecovery] = useState<SubtitleRecovery | null>(null)
@@ -138,15 +139,32 @@ export default function PlayerView({ onBack }: Props) {
 
   const reloadHtml5Playback = async () => {
     const video = videoRef.current
-    if (!video) return
+    const sourcePath = videoSrc
+    const recoveryToken = mediaRecoveryTokenRef.current
+    if (!video || !sourcePath || !isCurrentMediaRecovery({
+      recoveryToken,
+      currentToken: mediaRecoveryTokenRef.current,
+      sourcePath,
+      currentSourcePath: usePlayerStore.getState().videoSrc
+    })) return
     const resumeAt = usePlayerStore.getState().currentTime
     setPlaybackRecovery('none')
     setPlaybackNotice('')
-    video.addEventListener('loadedmetadata', () => {
+    pendingReloadCleanupRef.current?.()
+    const onLoadedMetadata = () => {
+      pendingReloadCleanupRef.current = null
+      if (!isCurrentMediaRecovery({
+        recoveryToken,
+        currentToken: mediaRecoveryTokenRef.current,
+        sourcePath,
+        currentSourcePath: usePlayerStore.getState().videoSrc
+      })) return
       const target = Math.max(0, Math.min(resumeAt, Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.05) : resumeAt))
       if (target > 0) video.currentTime = target
       if (usePlayerStore.getState().isPlaying) void video.play().catch(() => {})
-    }, { once: true })
+    }
+    pendingReloadCleanupRef.current = () => video.removeEventListener('loadedmetadata', onLoadedMetadata)
+    video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true })
     video.load()
   }
 
@@ -158,6 +176,12 @@ export default function PlayerView({ onBack }: Props) {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
       const current = await readLocalMediaStat(sourcePath)
+      if (!isCurrentMediaRecovery({
+        recoveryToken: token,
+        currentToken: mediaRecoveryTokenRef.current,
+        sourcePath,
+        currentSourcePath: usePlayerStore.getState().videoSrc
+      })) return
       if (!current) {
         setPlaybackRecovery('error')
         setPlaybackNotice('无法继续读取视频文件，请确认文件仍然存在')
@@ -182,7 +206,15 @@ export default function PlayerView({ onBack }: Props) {
   const handleVideoPlaybackError = async () => {
     if (!videoSrc) return
     if (playbackRecovery === 'waiting') return
-    const currentStat = isLocalMediaFile ? await readLocalMediaStat(videoSrc) : null
+    const sourcePath = videoSrc
+    const recoveryToken = mediaRecoveryTokenRef.current
+    const currentStat = isLocalMediaFile ? await readLocalMediaStat(sourcePath) : null
+    if (!isCurrentMediaRecovery({
+      recoveryToken,
+      currentToken: mediaRecoveryTokenRef.current,
+      sourcePath,
+      currentSourcePath: usePlayerStore.getState().videoSrc
+    })) return
     const action = classifyMediaPlaybackError({
       localFile: isLocalMediaFile,
       openedStat: openedMediaStatRef.current,
@@ -191,7 +223,7 @@ export default function PlayerView({ onBack }: Props) {
     if (action === 'growing' && currentStat) {
       setPlaybackRecovery('waiting')
       setPlaybackNotice('视频文件仍在生成，完成后会自动重试')
-      void waitForLocalMediaStable(videoSrc, currentStat)
+      void waitForLocalMediaStable(sourcePath, currentStat)
       return
     }
     setPlaybackRecovery('error')
@@ -202,9 +234,17 @@ export default function PlayerView({ onBack }: Props) {
 
   const openInCompatibilityPlayer = async () => {
     if (!videoSrc || !isLocalMediaFile || !mpvReady || !window.aiPlayer?.player) return
+    const sourcePath = videoSrc
+    const recoveryToken = mediaRecoveryTokenRef.current
     setPlaybackRecovery('compatibility')
     setPlaybackNotice('正在按你的选择打开兼容播放器')
-    const loaded = await window.aiPlayer.player.loadFile(videoSrc)
+    const loaded = await window.aiPlayer.player.loadFile(sourcePath)
+    if (!isCurrentMediaRecovery({
+      recoveryToken,
+      currentToken: mediaRecoveryTokenRef.current,
+      sourcePath,
+      currentSourcePath: usePlayerStore.getState().videoSrc
+    })) return
     if (!loaded) {
       setPlaybackRecovery('error')
       setPlaybackNotice('兼容播放器也无法读取；文件很可能尚未完成或已经损坏')
@@ -217,18 +257,32 @@ export default function PlayerView({ onBack }: Props) {
 
   const dismissPlaybackNotice = () => {
     mediaRecoveryTokenRef.current += 1
+    pendingReloadCleanupRef.current?.()
+    pendingReloadCleanupRef.current = null
     setPlaybackRecovery('none')
     setPlaybackNotice('')
   }
 
   const retryHtml5Playback = async () => {
-    mediaRecoveryTokenRef.current += 1
-    if (videoSrc && isLocalMediaFile) openedMediaStatRef.current = await readLocalMediaStat(videoSrc)
+    const sourcePath = videoSrc
+    const recoveryToken = ++mediaRecoveryTokenRef.current
+    if (sourcePath && isLocalMediaFile) {
+      const currentStat = await readLocalMediaStat(sourcePath)
+      if (!isCurrentMediaRecovery({
+        recoveryToken,
+        currentToken: mediaRecoveryTokenRef.current,
+        sourcePath,
+        currentSourcePath: usePlayerStore.getState().videoSrc
+      })) return
+      openedMediaStatRef.current = currentStat
+    }
     await reloadHtml5Playback()
   }
 
   useEffect(() => {
     mediaRecoveryTokenRef.current += 1
+    pendingReloadCleanupRef.current?.()
+    pendingReloadCleanupRef.current = null
     openedMediaStatRef.current = null
     setPlaybackRecovery('none')
     setPlaybackNotice('')
@@ -237,7 +291,11 @@ export default function PlayerView({ onBack }: Props) {
     void readLocalMediaStat(videoSrc).then((stat) => {
       if (token === mediaRecoveryTokenRef.current && videoSrc === usePlayerStore.getState().videoSrc) openedMediaStatRef.current = stat
     })
-    return () => { mediaRecoveryTokenRef.current += 1 }
+    return () => {
+      mediaRecoveryTokenRef.current += 1
+      pendingReloadCleanupRef.current?.()
+      pendingReloadCleanupRef.current = null
+    }
   }, [isLocalMediaFile, videoSrc])
 
   useEffect(() => {
