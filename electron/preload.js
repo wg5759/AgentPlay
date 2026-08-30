@@ -185,6 +185,7 @@ contextBridge.exposeInMainWorld('aiPlayer', {
   files: {
     scan: (dir) => ipcRenderer.invoke('files:scan', dir),
     defaultDir: () => ipcRenderer.invoke('files:defaultDir'),
+    stat: (filePath) => ipcRenderer.invoke('files:stat', filePath),
     readText: (filePath) => ipcRenderer.invoke('files:readText', filePath),
     readDataUrl: (filePath) => ipcRenderer.invoke('files:readDataUrl', filePath),
     getPathForFile: (file) => webUtils.getPathForFile(file)

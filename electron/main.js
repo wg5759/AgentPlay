@@ -5487,6 +5487,17 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('files:defaultDir', (event) => { assertTrustedSender(event); return defaultVideoDir() })
+  ipcMain.handle('files:stat', (event, filePath) => {
+    assertTrustedSender(event)
+    try {
+      const resolved = assertAllowedPath(filePath)
+      const stat = fs.statSync(resolved)
+      if (!stat.isFile()) throw new Error('目标不是文件')
+      return { success: true, size: stat.size, mtimeMs: stat.mtimeMs }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
   ipcMain.handle('files:readText', async (_e, filePath) => {
     assertTrustedSender(_e)
     try {

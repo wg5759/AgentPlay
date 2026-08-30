@@ -53,6 +53,9 @@ declare module '*.mjs' {
   export interface RecentMediaRecord { name: string; src: string; openedAt: number }
   export function normalizeRecentMedia(value: unknown, limit?: number): RecentMediaRecord[]
   export function recordRecentMedia(current: unknown, item: Partial<RecentMediaRecord>, limit?: number): RecentMediaRecord[]
+  export interface MediaFileStat { size: number; mtimeMs: number }
+  export function sameMediaFileStat(left: MediaFileStat | null | undefined, right: MediaFileStat | null | undefined): boolean
+  export function classifyMediaPlaybackError(input: { localFile: boolean; openedStat: MediaFileStat | null; currentStat: MediaFileStat | null }): 'growing' | 'stable-error' | 'unavailable'
 }
 
 // 桌面端 Electron 注入的全局 API 类型声明
@@ -979,6 +982,7 @@ interface AiPlayerAPI {
   files?: {
     scan: (dir?: string) => Promise<Array<{ name: string; path: string; ext: string; size: number }>>
     defaultDir: () => Promise<string>
+    stat: (filePath: string) => Promise<{ success: boolean; size?: number; mtimeMs?: number; error?: string }>
     readText: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>
     readDataUrl: (filePath: string) => Promise<{ success: boolean; dataUrl?: string; error?: string }>
     getPathForFile: (file: File) => string

@@ -4,9 +4,15 @@ import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 import { PLAYER_CHROME_HIDE_DELAY_MS, isRealMouseActivity, shouldAutoHideControls } from '../player-ui-policy.mjs'
 import { subtitleCueSettings, subtitleLinePercent } from '../subtitle-display-policy.mjs'
+import { classifyMediaPlaybackError, sameMediaFileStat } from '../player-media-error-policy.mjs'
 
 interface Props {
   onBack: () => void
+}
+
+interface MediaFileStat {
+  size: number
+  mtimeMs: number
 }
 
 const VIDEO_EXTS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v', '.wmv']
@@ -92,6 +98,9 @@ export default function PlayerView({ onBack }: Props) {
   const [mpvEmbedded, setMpvEmbedded] = useState(false)
   const [mpvReady, setMpvReady] = useState(false)
   const [playbackNotice, setPlaybackNotice] = useState('')
+  const [playbackRecovery, setPlaybackRecovery] = useState<'none' | 'waiting' | 'error' | 'compatibility'>('none')
+  const openedMediaStatRef = useRef<MediaFileStat | null>(null)
+  const mediaRecoveryTokenRef = useRef(0)
   const [subtitleResults, setSubtitleResults] = useState<Array<{ fileId: number; fileName: string; language: string; release: string }>>([])
   const [subtitleStatus, setSubtitleStatus] = useState('')
   const [subtitleRecovery, setSubtitleRecovery] = useState<SubtitleRecovery | null>(null)
@@ -119,6 +128,117 @@ export default function PlayerView({ onBack }: Props) {
     isDesktop && videoSrc && !videoSrc.startsWith('http') && !videoSrc.startsWith('blob:')
       ? 'file:///' + encodeURI(videoSrc.replace(/\\/g, '/')).replace(/#/g, '%23')
       : videoSrc
+  const isLocalMediaFile = Boolean(isDesktop && isMedia && videoSrc && !/^(https?|blob):/i.test(videoSrc))
+
+  const readLocalMediaStat = async (sourcePath: string): Promise<MediaFileStat | null> => {
+    const result = await window.aiPlayer?.files?.stat?.(sourcePath)
+    if (!result?.success || !Number.isFinite(result.size) || !Number.isFinite(result.mtimeMs)) return null
+    return { size: Number(result.size), mtimeMs: Number(result.mtimeMs) }
+  }
+
+  const reloadHtml5Playback = async () => {
+    const video = videoRef.current
+    if (!video) return
+    const resumeAt = usePlayerStore.getState().currentTime
+    setPlaybackRecovery('none')
+    setPlaybackNotice('')
+    video.addEventListener('loadedmetadata', () => {
+      const target = Math.max(0, Math.min(resumeAt, Number.isFinite(video.duration) ? Math.max(0, video.duration - 0.05) : resumeAt))
+      if (target > 0) video.currentTime = target
+      if (usePlayerStore.getState().isPlaying) void video.play().catch(() => {})
+    }, { once: true })
+    video.load()
+  }
+
+  const waitForLocalMediaStable = async (sourcePath: string, startingStat: MediaFileStat) => {
+    const token = ++mediaRecoveryTokenRef.current
+    let previous = startingStat
+    let stableSince = Date.now()
+    for (let attempt = 0; attempt < 900; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
+      const current = await readLocalMediaStat(sourcePath)
+      if (!current) {
+        setPlaybackRecovery('error')
+        setPlaybackNotice('无法继续读取视频文件，请确认文件仍然存在')
+        return
+      }
+      if (!sameMediaFileStat(previous, current)) {
+        previous = current
+        stableSince = Date.now()
+        continue
+      }
+      if (Date.now() - stableSince >= 8000) {
+        openedMediaStatRef.current = current
+        setPlaybackNotice('文件写入已结束，正在重新加载')
+        await reloadHtml5Playback()
+        return
+      }
+    }
+    setPlaybackRecovery('error')
+    setPlaybackNotice('视频文件长时间仍在写入，请完成导出后点击重新加载')
+  }
+
+  const handleVideoPlaybackError = async () => {
+    if (!videoSrc) return
+    if (playbackRecovery === 'waiting') return
+    const currentStat = isLocalMediaFile ? await readLocalMediaStat(videoSrc) : null
+    const action = classifyMediaPlaybackError({
+      localFile: isLocalMediaFile,
+      openedStat: openedMediaStatRef.current,
+      currentStat
+    })
+    if (action === 'growing' && currentStat) {
+      setPlaybackRecovery('waiting')
+      setPlaybackNotice('视频文件仍在生成，完成后会自动重试')
+      void waitForLocalMediaStable(videoSrc, currentStat)
+      return
+    }
+    setPlaybackRecovery('error')
+    setPlaybackNotice(isLocalMediaFile
+      ? '无法继续播放：文件可能未完成或码流损坏'
+      : '无法继续播放：网络中断或当前编码不受支持')
+  }
+
+  const openInCompatibilityPlayer = async () => {
+    if (!videoSrc || !isLocalMediaFile || !mpvReady || !window.aiPlayer?.player) return
+    setPlaybackRecovery('compatibility')
+    setPlaybackNotice('正在按你的选择打开兼容播放器')
+    const loaded = await window.aiPlayer.player.loadFile(videoSrc)
+    if (!loaded) {
+      setPlaybackRecovery('error')
+      setPlaybackNotice('兼容播放器也无法读取；文件很可能尚未完成或已经损坏')
+      return
+    }
+    await window.aiPlayer.player.setVolume(volume)
+    if (usePlayerStore.getState().isPlaying) await window.aiPlayer.player.play()
+    setPlaybackNotice('已按你的选择在兼容播放器中打开')
+  }
+
+  const dismissPlaybackNotice = () => {
+    mediaRecoveryTokenRef.current += 1
+    setPlaybackRecovery('none')
+    setPlaybackNotice('')
+  }
+
+  const retryHtml5Playback = async () => {
+    mediaRecoveryTokenRef.current += 1
+    if (videoSrc && isLocalMediaFile) openedMediaStatRef.current = await readLocalMediaStat(videoSrc)
+    await reloadHtml5Playback()
+  }
+
+  useEffect(() => {
+    mediaRecoveryTokenRef.current += 1
+    openedMediaStatRef.current = null
+    setPlaybackRecovery('none')
+    setPlaybackNotice('')
+    if (!isLocalMediaFile || !videoSrc) return
+    const token = mediaRecoveryTokenRef.current
+    void readLocalMediaStat(videoSrc).then((stat) => {
+      if (token === mediaRecoveryTokenRef.current && videoSrc === usePlayerStore.getState().videoSrc) openedMediaStatRef.current = stat
+    })
+    return () => { mediaRecoveryTokenRef.current += 1 }
+  }, [isLocalMediaFile, videoSrc])
 
   useEffect(() => {
     if (useMpv) return
@@ -1012,23 +1132,15 @@ export default function PlayerView({ onBack }: Props) {
           onLoadedMetadata={(e) => {
             setDuration(e.currentTarget.duration)
             e.currentTarget.playbackRate = playbackRate
+            if (videoSrc && isLocalMediaFile) {
+              void readLocalMediaStat(videoSrc).then((stat) => {
+                if (stat && videoSrc === usePlayerStore.getState().videoSrc) openedMediaStatRef.current = stat
+              })
+            }
           }}
           onTimeUpdate={(e) => updateTime(e.currentTarget.currentTime)}
           onEnded={() => usePlayerStore.setState({ isPlaying: false })}
-          onError={async () => {
-            if (!isDesktop || !mpvReady || !videoSrc || !window.aiPlayer?.player) {
-              setPlaybackNotice('当前视频编码无法播放')
-              return
-            }
-            const loaded = await window.aiPlayer.player.loadFile(videoSrc)
-            if (loaded) {
-              await window.aiPlayer.player.setVolume(volume)
-              await window.aiPlayer.player.play()
-              setPlaybackNotice('当前编码已切换到独立 mpv 兼容窗口')
-            } else {
-              setPlaybackNotice('当前视频编码无法播放')
-            }
-          }}
+          onError={() => { void handleVideoPlaybackError() }}
           playsInline
         >
           {subtitleUrl && <track ref={trackRef} src={subtitleUrl} kind="subtitles" srcLang={subtitleTrackLang} label={subtitleTrackLang === 'en' ? 'English' : '中文字幕'} default onError={() => setSubtitleStatus('翻译字幕轨加载失败，请重试')} />}
@@ -1092,8 +1204,14 @@ export default function PlayerView({ onBack }: Props) {
         </div>
       )}
       {playbackNotice && !useMpv && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 rounded bg-black/80 px-4 py-2 text-sm text-amber-300">
-          {playbackNotice}
+        <div data-playback-recovery={playbackRecovery} className="absolute top-20 left-1/2 z-30 flex max-w-[min(92%,620px)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-200/20 bg-black/90 px-4 py-3 text-sm text-amber-100 shadow-2xl" data-player-chrome="true">
+          {playbackRecovery === 'waiting' && <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-amber-300" />}
+          <span className="min-w-0 flex-1 leading-5">{playbackNotice}</span>
+          {playbackRecovery === 'error' && <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => { void retryHtml5Playback() }} className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-white hover:bg-white/15">重新加载</button>
+            {isLocalMediaFile && mpvReady && <button type="button" onClick={() => { void openInCompatibilityPlayer() }} className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-white hover:bg-white/15">兼容播放</button>}
+          </div>}
+          <button type="button" onClick={dismissPlaybackNotice} className="shrink-0 text-gray-400 hover:text-white" aria-label={playbackRecovery === 'waiting' ? '停止等待文件' : '关闭播放提示'}>✕</button>
         </div>
       )}
       {liveSub && !useMpv && (() => {
