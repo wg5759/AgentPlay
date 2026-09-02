@@ -1,5 +1,7 @@
 # AgentPlay GitHub 增长方案
 
+> 2026-09-02 更新：播放修复已通过 PR #42 合并，桌面同步和 [Preview 3](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3) 的安装器、便携包、9 项匿名下载校验闭环完成。见 [发布回执](RELEASE_0.9.1_PREVIEW3.md)。维护者校验下载不计外部增长。
+
 > 证据快照：2026-08-28。目标是获得真实用户、问题与贡献，不购买 Star、不互刷、不把 CI 克隆冒充采用。
 
 ## 执行进度（2026-08-28）

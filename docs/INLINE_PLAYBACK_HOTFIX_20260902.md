@@ -1,6 +1,6 @@
 # 原播放区域通用音视频修复（2026-09-02）
 
-状态：本地候选通过严格音画及全屏验收。2026-09-02 用户明确要求跳过本轮异源复审、直接安装并公开到 GitHub；因此不再等待源码外发审批，也不调用该复审。桌面归档已备份同步；最终安装路径回归、双平台 CI 和 Preview 3 发布回读继续执行。
+状态：已完成桌面同步与 [Preview 3 公开发布](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3)。用户明确豁免本轮异源复审；安装路径 14 场景、发布源码双平台 CI、安装器/便携包载荷与全部 9 项匿名下载哈希均通过。最终结果以 [发布回执](RELEASE_0.9.1_PREVIEW3.md) 为准，下文保留前期诊断和候选历史。
 
 实现提交：`f597ddc`，分支 `agent/0.9.1-inline-playback-20260902`。本记录不提高版本完成率。
 
@@ -23,7 +23,7 @@
 4. 影院模式旧条件分支导致真实媒体元素被重建；`release/inline-fullscreen-red-20260902.log` 锁定该红测。新 UI 测试对比全屏前后同一 DOM 对象，并检查 ESC 后继续播放。
 5. Chromium 会暂停被工具窗口遮挡的无声视频。可见 UI 验收进程单独关闭原生遮挡优化，生产应用没有修改该策略。不能把此类测试暂停当成文件损坏。
 
-## 本地证据
+## 前期候选证据（最终闭环见发布回执）
 
 - 解码矩阵：`release/inline-playback-smoke-8N1j3u/receipt.json`，16 项通过：13 个合成媒体样本、2 个无 FFmpeg 的随包 mpv 路径、1 个用户原片；源文件哈希保持不变。
 - 最终严格 UI：`release/inline-ui-6JVUKq/receipt.json`，14 项通过。覆盖 mp4v/MP4、AVI、WMV、MPEG-2/TS、FFV1/MKV、ProRes/MOV、H.264/AAC、H.264/AC3、WMA、AIFF、AC3、FLAC、Opus 和原片。视频均解出真实画面，有声样本均解出音频数据，暂停/恢复、历史原路径、双击全屏、ESC、快速三请求取消链通过；本应用 mpv 无独立窗口。
