@@ -71,10 +71,19 @@ try {
     }
     const loaded = await waitFor(s => s.present && s.readyState >= 2 && s.duration > 0 && !s.error && s.history?.src === source, `load ${source}`)
     assert.equal(loaded.visibility, 'visible', 'Playback test window must be visible')
-    await evaluate(`document.querySelector('[data-ai-player-video], [data-ai-player-audio]').loop = true`)
-    if (loaded.playTitle?.startsWith('播放')) await toggle()
     const target = Math.min(6, loaded.duration / 3)
+    // A two-second fixture may legitimately end during cold-start/CDP latency.
+    // Normalize through the real controls before testing seek and resume.
+    await evaluate(`(() => {
+      const media = document.querySelector('[data-ai-player-video], [data-ai-player-audio]');
+      media.loop = true;
+      const play = document.querySelector('.player-video-controls button[title]');
+      if (play.title.startsWith('暂停')) play.click();
+    })()`)
+    await waitFor(s => s.paused && s.playTitle?.startsWith('播放'), 'normalize short fixture pause', 5000)
     await evaluate(`document.querySelector('[data-ai-player-video], [data-ai-player-audio]').currentTime = ${target}`)
+    await toggle()
+    await waitFor(s => !s.paused && s.readyState >= 2, 'start normalized fixture', 5000)
     if (loaded.duration > 10) await waitFor(s => s.currentTime >= target + 2 && !s.paused, 'advance original')
     else { await sleep(400); assert.equal((await state()).paused, false, `not playing ${source}`) }
     await toggle()
