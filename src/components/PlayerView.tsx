@@ -4,13 +4,20 @@ import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 import { PLAYER_CHROME_HIDE_DELAY_MS, isRealMouseActivity, shouldAutoHideControls } from '../player-ui-policy.mjs'
 import { subtitleCueSettings, subtitleLinePercent } from '../subtitle-display-policy.mjs'
+import { classifyMediaPlaybackError, sameMediaFileStat } from '../player-media-error-policy.mjs'
+import mediaFormats from '../../electron/media-formats.json'
 
 interface Props {
   onBack: () => void
 }
 
-const VIDEO_EXTS = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v', '.wmv']
-const AUDIO_EXTS = ['.mp3', '.flac', '.wav', '.aac', '.m4a', '.ogg', '.wma']
+interface MediaFileStat {
+  size: number
+  mtimeMs: number
+}
+
+const VIDEO_EXTS = mediaFormats.video
+const AUDIO_EXTS = mediaFormats.audio
 const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg', '.ico', '.tif', '.tiff']
 const TEXT_EXTS = ['.txt', '.md', '.json', '.csv', '.xml', '.html', '.htm', '.css', '.js', '.ts', '.tsx', '.jsx', '.py', '.java', '.c', '.cpp', '.h', '.sh', '.yml', '.yaml', '.ini', '.conf', '.log', '.bat', '.ps1', '.sql', '.toml', '.env']
 const OFFICE_EXTS = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.rtf']
@@ -90,8 +97,14 @@ export default function PlayerView({ onBack }: Props) {
   const [textContent, setTextContent] = useState<string | null>(null)
   const [dataUrl, setDataUrl] = useState<string | null>(null)
   const [mpvEmbedded, setMpvEmbedded] = useState(false)
-  const [mpvReady, setMpvReady] = useState(false)
   const [playbackNotice, setPlaybackNotice] = useState('')
+  const [playbackRecovery, setPlaybackRecovery] = useState<'none' | 'waiting' | 'error' | 'preparing'>('none')
+  const [playbackSource, setPlaybackSource] = useState<{ original: string; path: string; kind: 'video' | 'audio' } | null>(null)
+  const inlineRequestRef = useRef<string | null>(null)
+  const inlineAttemptedRef = useRef('')
+  const inlineResumeRef = useRef<{ source: string; time: number } | null>(null)
+  const openedMediaStatRef = useRef<MediaFileStat | null>(null)
+  const mediaRecoveryTokenRef = useRef(0)
   const [subtitleResults, setSubtitleResults] = useState<Array<{ fileId: number; fileName: string; language: string; release: string }>>([])
   const [subtitleStatus, setSubtitleStatus] = useState('')
   const [subtitleRecovery, setSubtitleRecovery] = useState<SubtitleRecovery | null>(null)
@@ -111,14 +124,190 @@ export default function PlayerView({ onBack }: Props) {
   const langPromptOffRef = useRef(false)
 
   const isDesktop = window.aiPlayer?.isElectron === true
-  const fileType = getFileType(mediaName)
+  const fileType = playbackSource?.original === videoSrc ? playbackSource.kind : getFileType(mediaName)
   const isMedia = fileType === 'video' || fileType === 'audio'
   const useMpv = isDesktop && isMedia && mpvEmbedded
 
+  const effectiveSource = playbackSource?.original === videoSrc ? playbackSource.path : videoSrc
+  const isLocalMediaFile = Boolean(isDesktop && isMedia && videoSrc && !/^(https?|blob):/i.test(videoSrc))
+  const awaitingPreflight = isLocalMediaFile && Boolean(window.aiPlayer?.inlinePlayback) && playbackSource?.original !== videoSrc
   const fileUrl =
-    isDesktop && videoSrc && !videoSrc.startsWith('http') && !videoSrc.startsWith('blob:')
-      ? 'file:///' + encodeURI(videoSrc.replace(/\\/g, '/')).replace(/#/g, '%23')
-      : videoSrc
+    awaitingPreflight ? undefined : isDesktop && effectiveSource && !effectiveSource.startsWith('http') && !effectiveSource.startsWith('blob:')
+      ? 'file:///' + encodeURI(effectiveSource.replace(/\\/g, '/')).replace(/#/g, '%23')
+      : effectiveSource
+
+  const readLocalMediaStat = async (sourcePath: string): Promise<MediaFileStat | null> => {
+    const result = await window.aiPlayer?.files?.stat?.(sourcePath).catch(() => null)
+    if (!result?.success || !Number.isFinite(result.size) || !Number.isFinite(result.mtimeMs)) return null
+    return { size: Number(result.size), mtimeMs: Number(result.mtimeMs) }
+  }
+
+  const reloadHtml5Playback = async () => {
+    const video = fileType === 'audio' ? audioRef.current : videoRef.current
+    if (!video || !videoSrc || videoSrc !== usePlayerStore.getState().videoSrc) return
+    const resumeAt = usePlayerStore.getState().currentTime
+    inlineResumeRef.current = { source: videoSrc, time: resumeAt }
+    setPlaybackRecovery('none')
+    setPlaybackNotice('')
+    video.load()
+  }
+
+  const prepareInlinePlayback = async (preflight = false) => {
+    const sourcePath = videoSrc
+    const api = window.aiPlayer?.inlinePlayback
+    if (!sourcePath || !isLocalMediaFile || !window.aiPlayer?.inlinePlayback?.prepare || !api) return false
+    const token = ++mediaRecoveryTokenRef.current
+    const requestId = `playback-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    inlineAttemptedRef.current = sourcePath
+    inlineRequestRef.current = requestId
+    inlineResumeRef.current = { source: sourcePath, time: usePlayerStore.getState().currentTime }
+    setPlaybackRecovery('preparing')
+    setPlaybackNotice('正在本机准备播放，不会上传或修改原文件…')
+    const current = () => token === mediaRecoveryTokenRef.current && sourcePath === usePlayerStore.getState().videoSrc
+    const unsubscribe = api.onProgress(progress => {
+      if (progress.requestId !== requestId || !current()) return
+      const percent = Number.isFinite(progress.percent) ? ` ${progress.percent}%` : ''
+      setPlaybackNotice(progress.phase === 'verifying' ? '正在校验播放缓存…' : progress.phase === 'probing' ? '正在识别音视频编码…' : `正在本机准备播放${percent}，原文件保持不变`)
+    })
+    try {
+      const result = await api.prepare({ requestId, sourcePath, kind: fileType === 'audio' ? 'audio' : 'video', preflight })
+      if (!current()) return true
+      if (!result.success || !result.path) throw new Error(result.error || '当前媒体无法在本机解码')
+      inlineAttemptedRef.current = result.backend === 'html5' ? '' : sourcePath
+      setPlaybackSource({ original: sourcePath, path: result.path, kind: result.kind || (fileType === 'audio' ? 'audio' : 'video') })
+      setPlaybackRecovery('none')
+      setPlaybackNotice('')
+    } catch (error) {
+      if (current()) {
+        setPlaybackRecovery('error')
+        setPlaybackNotice(error instanceof Error ? error.message : '当前媒体无法在本机解码')
+      }
+    } finally {
+      unsubscribe()
+      if (inlineRequestRef.current === requestId) inlineRequestRef.current = null
+    }
+    return true
+  }
+
+  const handleLoadedMedia = (element: HTMLMediaElement) => {
+    setDuration(element.duration)
+    element.playbackRate = playbackRate
+    element.volume = volume / 100
+    const resume = inlineResumeRef.current
+    if (resume && resume.source === videoSrc && videoSrc === usePlayerStore.getState().videoSrc) {
+      inlineResumeRef.current = null
+      if (resume.time > 0) element.currentTime = Math.max(0, Math.min(resume.time, Math.max(0, element.duration - 0.05)))
+      if (usePlayerStore.getState().isPlaying) void element.play().catch(() => {})
+    }
+    if (videoSrc && isLocalMediaFile) {
+      const token = mediaRecoveryTokenRef.current
+      void readLocalMediaStat(videoSrc).then(stat => {
+        if (token === mediaRecoveryTokenRef.current && videoSrc === usePlayerStore.getState().videoSrc && stat) openedMediaStatRef.current = stat
+      })
+    }
+  }
+
+  const waitForLocalMediaStable = async (sourcePath: string, startingStat: MediaFileStat) => {
+    const token = ++mediaRecoveryTokenRef.current
+    let previous = startingStat
+    let stableSince = Date.now()
+    for (let attempt = 0; attempt < 900; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
+      const current = await readLocalMediaStat(sourcePath)
+      if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
+      if (!current) {
+        setPlaybackRecovery('error')
+        setPlaybackNotice('无法继续读取视频文件，请确认文件仍然存在')
+        return
+      }
+      if (!sameMediaFileStat(previous, current)) {
+        previous = current
+        stableSince = Date.now()
+        continue
+      }
+      if (Date.now() - stableSince >= 8000) {
+        openedMediaStatRef.current = current
+        setPlaybackNotice('文件写入已结束，正在重新加载')
+        await reloadHtml5Playback()
+        return
+      }
+    }
+    setPlaybackRecovery('error')
+    setPlaybackNotice('视频文件长时间仍在写入，请完成导出后点击重新加载')
+  }
+
+  const handleVideoPlaybackError = async () => {
+    if (!videoSrc) return
+    if (playbackRecovery === 'waiting' || inlineRequestRef.current) return
+    const sourcePath = videoSrc
+    const token = mediaRecoveryTokenRef.current
+    const currentStat = isLocalMediaFile ? await readLocalMediaStat(sourcePath) : null
+    if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
+    const action = classifyMediaPlaybackError({
+      localFile: isLocalMediaFile,
+      openedStat: openedMediaStatRef.current,
+      currentStat
+    })
+    if (action === 'growing' && currentStat) {
+      setPlaybackRecovery('waiting')
+      setPlaybackNotice('视频文件仍在生成，完成后会自动重试')
+      void waitForLocalMediaStable(sourcePath, currentStat)
+      return
+    }
+    if (isLocalMediaFile && inlineAttemptedRef.current !== sourcePath && await prepareInlinePlayback()) return
+    setPlaybackRecovery('error')
+    setPlaybackNotice(isLocalMediaFile
+      ? '无法继续播放：文件可能未完成或码流损坏'
+      : '无法继续播放：网络中断或当前编码不受支持')
+  }
+
+  const dismissPlaybackNotice = () => {
+    const preparing = playbackRecovery === 'preparing'
+    mediaRecoveryTokenRef.current += 1
+    if (inlineRequestRef.current) void window.aiPlayer?.inlinePlayback?.cancel(inlineRequestRef.current)
+    inlineRequestRef.current = null
+    inlineResumeRef.current = null
+    setPlaybackRecovery(preparing ? 'error' : 'none')
+    setPlaybackNotice(preparing ? '已停止播放准备，可以重新加载继续' : '')
+  }
+
+  const retryHtml5Playback = async () => {
+    const token = ++mediaRecoveryTokenRef.current
+    const sourcePath = videoSrc
+    inlineAttemptedRef.current = ''
+    if (sourcePath && isLocalMediaFile) {
+      const stat = await readLocalMediaStat(sourcePath)
+      if (token !== mediaRecoveryTokenRef.current || sourcePath !== usePlayerStore.getState().videoSrc) return
+      openedMediaStatRef.current = stat
+      if (await prepareInlinePlayback()) return
+    }
+    await reloadHtml5Playback()
+  }
+
+  useEffect(() => {
+    mediaRecoveryTokenRef.current += 1
+    if (inlineRequestRef.current) void window.aiPlayer?.inlinePlayback?.cancel(inlineRequestRef.current)
+    inlineRequestRef.current = null
+    inlineAttemptedRef.current = ''
+    inlineResumeRef.current = null
+    setPlaybackSource(null)
+    openedMediaStatRef.current = null
+    setPlaybackRecovery('none')
+    setPlaybackNotice('')
+    if (!isLocalMediaFile || !videoSrc) return
+    void prepareInlinePlayback(true)
+    const token = mediaRecoveryTokenRef.current
+    void readLocalMediaStat(videoSrc).then((stat) => {
+      if (token === mediaRecoveryTokenRef.current && videoSrc === usePlayerStore.getState().videoSrc) openedMediaStatRef.current = stat
+    })
+    return () => {
+      mediaRecoveryTokenRef.current += 1
+      if (inlineRequestRef.current) void window.aiPlayer?.inlinePlayback?.cancel(inlineRequestRef.current)
+      inlineRequestRef.current = null
+      inlineResumeRef.current = null
+    }
+  }, [isLocalMediaFile, videoSrc])
 
   useEffect(() => {
     if (useMpv) return
@@ -187,7 +376,6 @@ export default function PlayerView({ onBack }: Props) {
     let active = true
     window.aiPlayer.player.info().then((info) => {
       if (active) {
-        setMpvReady(info.ready)
         setMpvEmbedded(info.ready && info.embedded)
       }
     })
@@ -1010,25 +1198,11 @@ export default function PlayerView({ onBack }: Props) {
                 ? 'w-full h-full object-contain'
                 : 'w-full h-full object-contain'}
           onLoadedMetadata={(e) => {
-            setDuration(e.currentTarget.duration)
-            e.currentTarget.playbackRate = playbackRate
+            handleLoadedMedia(e.currentTarget)
           }}
           onTimeUpdate={(e) => updateTime(e.currentTarget.currentTime)}
           onEnded={() => usePlayerStore.setState({ isPlaying: false })}
-          onError={async () => {
-            if (!isDesktop || !mpvReady || !videoSrc || !window.aiPlayer?.player) {
-              setPlaybackNotice('当前视频编码无法播放')
-              return
-            }
-            const loaded = await window.aiPlayer.player.loadFile(videoSrc)
-            if (loaded) {
-              await window.aiPlayer.player.setVolume(volume)
-              await window.aiPlayer.player.play()
-              setPlaybackNotice('当前编码已切换到独立 mpv 兼容窗口')
-            } else {
-              setPlaybackNotice('当前视频编码无法播放')
-            }
-          }}
+          onError={() => { void handleVideoPlaybackError() }}
           playsInline
         >
           {subtitleUrl && <track ref={trackRef} src={subtitleUrl} kind="subtitles" srcLang={subtitleTrackLang} label={subtitleTrackLang === 'en' ? 'English' : '中文字幕'} default onError={() => setSubtitleStatus('翻译字幕轨加载失败，请重试')} />}
@@ -1092,8 +1266,13 @@ export default function PlayerView({ onBack }: Props) {
         </div>
       )}
       {playbackNotice && !useMpv && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 rounded bg-black/80 px-4 py-2 text-sm text-amber-300">
-          {playbackNotice}
+        <div data-playback-recovery={playbackRecovery} className="absolute top-20 left-1/2 z-30 flex max-w-[min(92%,620px)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-amber-200/20 bg-black/90 px-4 py-3 text-sm text-amber-100 shadow-2xl" data-player-chrome="true">
+          {(playbackRecovery === 'waiting' || playbackRecovery === 'preparing') && <span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-amber-300" />}
+          <span className="min-w-0 flex-1 leading-5">{playbackNotice}</span>
+          {playbackRecovery === 'error' && <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => { void retryHtml5Playback() }} className="rounded-lg bg-white/10 px-2.5 py-1.5 text-xs text-white hover:bg-white/15">重新加载</button>
+          </div>}
+          <button type="button" onClick={dismissPlaybackNotice} className="shrink-0 text-gray-400 hover:text-white" aria-label={playbackRecovery === 'preparing' ? '停止播放准备' : playbackRecovery === 'waiting' ? '停止等待文件' : '关闭播放提示'}>✕</button>
         </div>
       )}
       {liveSub && !useMpv && (() => {
@@ -1114,9 +1293,11 @@ export default function PlayerView({ onBack }: Props) {
           <p className="text-gray-300 mb-4">{mediaName}</p>
           <audio
             ref={audioRef}
+            data-ai-player-audio="true"
             src={fileUrl}
             className="w-96"
-            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+            onLoadedMetadata={(e) => handleLoadedMedia(e.currentTarget)}
+            onError={() => { void handleVideoPlaybackError() }}
             onTimeUpdate={(e) => updateTime(e.currentTarget.currentTime)}
             onEnded={() => usePlayerStore.setState({ isPlaying: false })}
           />

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useAgentStore } from '../stores/agentStore'
 import Recorder from './Recorder'
 import { usePlayerStore } from '../stores/playerStore'
+import mediaFormats from '../../electron/media-formats.json'
 
 interface MediaFile {
   name: string
@@ -183,7 +184,7 @@ export default function MediaLibrary({ onPlay, rootDir, actionRequest }: Props) 
       setMetadataStatus('请先在“运行与隐私”里填写 TMDB Key')
       return
     }
-    const videos = files.filter((f) => ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.wmv'].includes(f.ext)).slice(0, 30)
+    const videos = files.filter((f) => mediaFormats.video.includes(f.ext.toLowerCase())).slice(0, 30)
     if (videos.length === 0) {
       setMetadataStatus('媒体库里没有可刮削的视频')
       return
@@ -676,7 +677,7 @@ export default function MediaLibrary({ onPlay, rootDir, actionRequest }: Props) 
                     🖨️
                   </button>
                 )}
-                {['.mp4', '.mkv', '.avi', '.mov', '.webm', '.ts', '.m4v', '.wmv'].includes(f.ext) && (
+                {mediaFormats.video.includes(f.ext.toLowerCase()) && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation()

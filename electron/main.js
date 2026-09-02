@@ -2,6 +2,12 @@
 // dev: 加载 Vite dev server；prod: 加载构建产物
 // 集成 mpv sidecar，IPC 桥接渲染进程
 const { app, BrowserWindow, ipcMain, Menu, dialog, safeStorage, session, desktopCapturer, globalShortcut, Notification } = require('electron')
+// Forward additional files before loading the heavy application module graph.
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+  return
+}
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -9,6 +15,7 @@ const crypto = require('crypto')
 const ExcelJS = require('exceljs')
 const { execFileSync, spawn } = require('child_process')
 const { MpvService } = require('./mpv-service')
+const { InlinePlaybackService } = require('./inline-playback-service')
 const { requestScreenGuide, askAboutImage } = require('./screen-guide-service')
 const { shouldEmbedMpv } = require('./playback-policy')
 const { AgentEngine } = require('./llm-service')
@@ -147,6 +154,7 @@ const activeAnalysisRequests = new Map()
 const activeSubtitleMediaJobs = new Map()
 const activeMediaDownloads = new Map()
 const activeMediaTasks = new Map()
+const inlinePlaybackJobs = new Map()
 const activeCreativeTasks = new Map()
 let liveSubtitleSession = null
 let liveTranscribeSession = null
@@ -271,10 +279,7 @@ function queueDocumentVerbArgs(argv) {
   return true
 }
 
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-} else {
+{
   app.on('second-instance', (_event, argv) => {
     queueExternalMediaArgs(argv)
     if (mainWindow) {
@@ -699,6 +704,14 @@ const videoFrames = new VideoFrameService({
   ffprobePath: path.join(app.getPath('userData'), 'yt-dlp', 'ffmpeg-8.0.1-essentials_build', 'bin', 'ffprobe.exe')
 })
 const mediaEditService = new MediaEditService({ frames: videoFrames, transcription: transcriptionService })
+const nativePlaybackBinary = new MpvService().getBinaryPath()
+const inlinePlayback = new InlinePlaybackService({
+  cacheDir: path.join(app.getPath('userData'), 'playback-cache'),
+  ffmpegPath: videoFrames.ffmpegPath,
+  ffprobePath: videoFrames.ffprobePath,
+  mpvPath: nativePlaybackBinary,
+  authorizePath: value => assertAllowedPath(value, { denyExecutable: true })
+})
 const subtitleLayoutService = new SubtitleLayoutService({ frames: videoFrames })
 const visualExportQuality = new VisualExportQualityGate({ frames: videoFrames })
 const mediaEditExecutors = new MediaEditExecutorRegistry({ service: mediaEditService, visualQuality: visualExportQuality })
@@ -981,6 +994,9 @@ Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate))
 log.info('AgentPlay 启动')
 
 app.whenReady().then(async () => {
+  // External-file delivery can precede the awaited optional services below.
+  // Register playback before rendering so opening a file never races IPC setup.
+  registerInlinePlaybackIpc()
   const win = createWindow()
   taskNotificationService = new TaskNotificationService({
     rootDir: path.join(app.getPath('userData'), 'task-notifications'),
@@ -2040,7 +2056,14 @@ app.whenReady().then(async () => {
     if (mpvContainer && !mpvContainer.isDestroyed()) mpvContainer.hide()
   })
   ipcMain.handle('mpv:info', (event) => { assertTrustedSender(event); return ({ ready: mpvReady, embedded: mpvReady && !!mpvContainer, available: mpv.isAvailable() }) })
-  ipcMain.handle('mpv:load', (_e, p) => { assertTrustedSender(_e); return mpvReady && mpv.loadFile(p) })
+  ipcMain.handle('mpv:load', (event, p) => {
+    assertTrustedSender(event)
+    const source = assertAllowedPath(p, { denyExecutable: true })
+    if (mpvReady && mpv.embedded) return mpv.loadFile(source)
+    // Legacy callers share the same visible player instead of opening a second window.
+    event.sender.send('menu:openFile', source)
+    return true
+  })
   ipcMain.handle('mpv:play', (event) => { assertTrustedSender(event); return mpvReady && mpv.play() })
   ipcMain.handle('mpv:pause', (event) => { assertTrustedSender(event); return mpvReady && mpv.pause() })
   ipcMain.handle('mpv:seek', (_e, s) => { assertTrustedSender(_e); return mpvReady && mpv.seek(s) })
@@ -5487,6 +5510,53 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('files:defaultDir', (event) => { assertTrustedSender(event); return defaultVideoDir() })
+  function registerInlinePlaybackIpc() {
+  ipcMain.handle('inline-playback:prepare', async (event, input = {}) => {
+    assertTrustedSender(event)
+    const requestId = String(input.requestId || '')
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(requestId)) return { success: false, error: '播放请求无效' }
+    let source
+    try { source = assertAllowedPath(input.sourcePath, { denyExecutable: true }) } catch (error) { return { success: false, error: error.message } }
+    const owner = event.sender.id
+    const previous = inlinePlaybackJobs.get(owner)
+    let finish
+    const job = { requestId, controller: new AbortController(), promise: null, settled: new Promise(resolve => { finish = resolve }) }
+    inlinePlaybackJobs.set(owner, job)
+    const abort = () => job.controller.abort()
+    event.sender.once('destroyed', abort)
+    try {
+      if (previous) { previous.controller.abort(); await previous.settled }
+      if (job.controller.signal.aborted || inlinePlaybackJobs.get(owner) !== job) throw new Error('已取消播放准备')
+      job.promise = inlinePlayback.prepare(source, {
+        kind: input.kind === 'audio' ? 'audio' : 'video', signal: job.controller.signal, allowDirect: input.preflight === true,
+        onProgress: progress => { if (!event.sender.isDestroyed()) event.sender.send('inline-playback:progress', { requestId, ...progress }) }
+      })
+      const result = await job.promise
+      if (job.controller.signal.aborted) throw new Error('已取消播放准备')
+      userAuthorizedPaths.add(path.resolve(result.path))
+      return { success: true, ...result }
+    } catch (error) { return { success: false, cancelled: job.controller.signal.aborted, error: error.message || String(error) } }
+    finally { finish(); event.sender.removeListener('destroyed', abort); if (inlinePlaybackJobs.get(owner) === job) inlinePlaybackJobs.delete(owner) }
+  })
+  ipcMain.handle('inline-playback:cancel', (event, requestId) => {
+    assertTrustedSender(event)
+    const job = inlinePlaybackJobs.get(event.sender.id)
+    if (!job || job.requestId !== requestId) return false
+    job.controller.abort()
+    return true
+  })
+  }
+  ipcMain.handle('files:stat', (event, filePath) => {
+    assertTrustedSender(event)
+    try {
+      const resolved = assertAllowedPath(filePath)
+      const stat = fs.statSync(resolved)
+      if (!stat.isFile()) throw new Error('目标不是文件')
+      return { success: true, size: stat.size, mtimeMs: stat.mtimeMs }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
   ipcMain.handle('files:readText', async (_e, filePath) => {
     assertTrustedSender(_e)
     try {
@@ -5926,6 +5996,8 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  for (const job of inlinePlaybackJobs.values()) job.controller.abort()
+  for (const job of inlinePlaybackJobs.values()) job.controller.abort()
   for (const controller of activeAiRequests.values()) controller.abort()
   for (const controller of activeComputerUseRequests.values()) controller.abort()
   for (const controller of activeDocumentRequests.values()) controller.abort()

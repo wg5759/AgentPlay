@@ -29,13 +29,11 @@ export default function Workbench({ rightOpen, sidebar, center, right }: Props) 
   const showRail = !theater && (!rightOpen || pinned)
   const journey = workspaceJourneyForTask(journeyTask)
 
-  if (theater) return <div className="workspace-theater">{rightOpen ? right : center}</div>
-
   return (
-    <div className="workspace-shell">
+    <div className={'workspace-shell' + (theater ? ' workspace-theater' : '')}>
       {showRail && <aside className="workspace-rail-shell">{sidebar({ pinned, onTogglePin: togglePin })}</aside>}
 
-      <section className="workspace-stage">
+      <section key="stage" className="workspace-stage">
         <header className={'workspace-topbar' + (rightOpen ? ' workspace-topbar-focus' : '')}>
           <div className="workspace-topbar-title">
             {!showRail && <span className="workspace-inline-brand"><UiIcon name="agent" size={22} /></span>}

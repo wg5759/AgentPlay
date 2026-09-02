@@ -182,9 +182,19 @@ contextBridge.exposeInMainWorld('aiPlayer', {
       return () => ipcRenderer.removeListener('computerUse:status', handler)
     }
   },
+  inlinePlayback: {
+    prepare: (input) => ipcRenderer.invoke('inline-playback:prepare', input),
+    cancel: (requestId) => ipcRenderer.invoke('inline-playback:cancel', requestId),
+    onProgress: (cb) => {
+      const handler = (_event, payload) => cb(payload)
+      ipcRenderer.on('inline-playback:progress', handler)
+      return () => ipcRenderer.removeListener('inline-playback:progress', handler)
+    }
+  },
   files: {
     scan: (dir) => ipcRenderer.invoke('files:scan', dir),
     defaultDir: () => ipcRenderer.invoke('files:defaultDir'),
+    stat: (filePath) => ipcRenderer.invoke('files:stat', filePath),
     readText: (filePath) => ipcRenderer.invoke('files:readText', filePath),
     readDataUrl: (filePath) => ipcRenderer.invoke('files:readDataUrl', filePath),
     getPathForFile: (file) => webUtils.getPathForFile(file)
