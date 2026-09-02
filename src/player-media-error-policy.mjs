@@ -7,10 +7,6 @@ export function sameMediaFileStat(left, right) {
   return Number(left.size) === Number(right.size) && Math.trunc(Number(left.mtimeMs)) === Math.trunc(Number(right.mtimeMs))
 }
 
-export function isCurrentMediaRecovery({ recoveryToken, currentToken, sourcePath, currentSourcePath }) {
-  return Number(recoveryToken) === Number(currentToken) && Boolean(sourcePath) && sourcePath === currentSourcePath
-}
-
 export function classifyMediaPlaybackError({ localFile, openedStat, currentStat }) {
   if (!localFile) return 'unavailable'
   if (validStat(openedStat) && validStat(currentStat) && !sameMediaFileStat(openedStat, currentStat)) return 'growing'

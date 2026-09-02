@@ -20,8 +20,9 @@ for (const required of [executable, mediaPath]) {
 const child = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`,
+  ...(process.argv.includes('--visible') ? ['--disable-backgrounding-occluded-windows', '--disable-features=CalculateNativeWinOcclusion'] : []),
   mediaPath
-], { cwd: path.dirname(executable), windowsHide: true, shell: false })
+], { cwd: path.dirname(executable), windowsHide: !process.argv.includes('--visible'), shell: false })
 
 let websocket
 let nextId = 0
@@ -66,6 +67,8 @@ async function snapshot() {
     const video = document.querySelector('video[data-ai-player-video="true"]')
     return {
       present: Boolean(video),
+      visibility: document.visibilityState,
+      playButton: document.querySelector('.player-video-controls button[title]')?.title,
       currentTime: Number(video?.currentTime || 0),
       duration: Number(video?.duration || 0),
       readyState: Number(video?.readyState || 0),
@@ -94,6 +97,12 @@ try {
     websocket.addEventListener('error', reject, { once: true })
   })
   await command('Runtime.enable')
+  if (process.argv.includes('--trace')) await evaluate(`(() => {
+    window.__playTrace = [];
+    const pause = HTMLMediaElement.prototype.pause;
+    HTMLMediaElement.prototype.pause = function() { window.__playTrace.push({event:'pause-call', time:this.currentTime, stack:new Error().stack}); return pause.call(this); };
+    for (const type of ['play','pause','ended','loadedmetadata','error','seeking','seeked']) document.addEventListener(type, e => { if (e.target instanceof HTMLMediaElement) window.__playTrace.push({event:type, time:e.target.currentTime, src:e.target.currentSrc}); }, true);
+  })()`)
   await command('Page.bringToFront')
 
   let initial
@@ -134,6 +143,11 @@ try {
   }
 
   process.stdout.write(`${JSON.stringify({ version: await evaluate('window.aiPlayer?.version'), seekTarget, seekResult, result })}\n`)
+  if (process.argv.includes('--trace')) process.stdout.write(JSON.stringify(await evaluate('window.__playTrace')) + '\n')
+  if (process.argv.includes('--trace')) {
+    const shot = await command('Page.captureScreenshot', { format: 'png' })
+    fs.writeFileSync(path.join(root, 'release/inline-playback-trace.png'), Buffer.from(shot.data, 'base64'))
+  }
   assert.equal(result?.fallback, false, '播放中途错误地切换到独立 mpv 兼容窗口')
   assert.equal(result?.error, null, `HTML5 播放中途出错：${JSON.stringify(result?.error)}`)
   assert.ok(result?.currentTime >= seekTarget + 6, `中段播放没有持续前进：${JSON.stringify(result)}`)

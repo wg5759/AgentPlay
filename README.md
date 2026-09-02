@@ -65,7 +65,9 @@ It is not another hidden automation spinner. Source files are preserved, risky a
 
 ## Download
 
-The current public stable release is [v0.7.6](https://github.com/wg5759/AgentPlay/releases/tag/v0.7.6). The newer line is available as [v0.9.1 Preview 2](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.2), an explicitly **unsigned GitHub Prerelease** for early testers.
+The current public stable release is [v0.7.6](https://github.com/wg5759/AgentPlay/releases/tag/v0.7.6). The newer line is available as [v0.9.1 Preview 3](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3), an explicitly **unsigned GitHub Prerelease** for early testers.
+
+Preview 3 keeps local video and audio in the same player area, checks both tracks before playback, and prepares a local compatibility cache when needed. Originals stay unchanged; first-time preparation can take time. Fullscreen and Escape preserve the active media element.
 
 Unsigned Preview/Beta builds are GitHub prereleases and include an installer, portable ZIP, SHA-256 checksums, a release manifest, verification report, security scan, SBOM, and a reviewed installation script. They may trigger Windows SmartScreen because AgentPlay does not yet have an approved Authenticode certificate. Unsigned builds are never labeled Stable.
 

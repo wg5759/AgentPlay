@@ -1,0 +1,4 @@
+{
+  "video": [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".ts", ".m4v", ".wmv", ".mpg", ".mpeg", ".m2v", ".m1v", ".m2ts", ".mts", ".vob", ".ogv", ".3gp", ".3g2", ".f4v", ".rm", ".rmvb", ".mxf", ".dv", ".nut"],
+  "audio": [".mp3", ".flac", ".wav", ".aac", ".m4a", ".ogg", ".wma", ".opus", ".aif", ".aiff", ".ac3", ".eac3", ".dts", ".ape", ".mka", ".m4b", ".amr", ".au", ".caf", ".w64", ".wv", ".tta", ".weba"]
+}

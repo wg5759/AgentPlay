@@ -55,7 +55,6 @@ declare module '*.mjs' {
   export function recordRecentMedia(current: unknown, item: Partial<RecentMediaRecord>, limit?: number): RecentMediaRecord[]
   export interface MediaFileStat { size: number; mtimeMs: number }
   export function sameMediaFileStat(left: MediaFileStat | null | undefined, right: MediaFileStat | null | undefined): boolean
-  export function isCurrentMediaRecovery(input: { recoveryToken: number; currentToken: number; sourcePath: string; currentSourcePath: string | null }): boolean
   export function classifyMediaPlaybackError(input: { localFile: boolean; openedStat: MediaFileStat | null; currentStat: MediaFileStat | null }): 'growing' | 'stable-error' | 'unavailable'
 }
 
@@ -418,6 +417,11 @@ interface LongVideoVersionPlanV1 {
 }
 
 interface AiPlayerAPI {
+  inlinePlayback?: {
+    prepare: (input: { requestId: string; sourcePath: string; kind: 'video' | 'audio'; preflight?: boolean }) => Promise<{ success: boolean; path?: string; cached?: boolean; kind?: 'video' | 'audio'; duration?: number; backend?: string; cancelled?: boolean; error?: string }>
+    cancel: (requestId: string) => Promise<boolean>
+    onProgress: (cb: (progress: { requestId: string; phase: string; percent?: number }) => void) => () => void
+  }
   platform: string
   isElectron: boolean
   version: string
