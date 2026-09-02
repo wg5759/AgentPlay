@@ -2,6 +2,12 @@
 // dev: 加载 Vite dev server；prod: 加载构建产物
 // 集成 mpv sidecar，IPC 桥接渲染进程
 const { app, BrowserWindow, ipcMain, Menu, dialog, safeStorage, session, desktopCapturer, globalShortcut, Notification } = require('electron')
+// Forward additional files before loading the heavy application module graph.
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+  return
+}
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
@@ -273,13 +279,7 @@ function queueDocumentVerbArgs(argv) {
   return true
 }
 
-const gotTheLock = app.requestSingleInstanceLock()
-if (!gotTheLock) {
-  app.quit()
-  // app.quit() is asynchronous; stop this module before a forwarded instance
-  // can create windows, start mpv, or race the primary's component downloads.
-  return
-} else {
+{
   app.on('second-instance', (_event, argv) => {
     queueExternalMediaArgs(argv)
     if (mainWindow) {

@@ -54,6 +54,9 @@ try {
   await new Promise((resolve, reject) => { ws.addEventListener('open', resolve, { once: true }); ws.addEventListener('error', reject, { once: true }) })
   await command('Runtime.enable')
   await command('Page.bringToFront')
+  // Keep the test page active while the user works in another foreground app.
+  // This changes CDP test focus only, never the production playback policy.
+  await command('Emulation.setFocusEmulationEnabled', { enabled: true })
   await evaluate(`window.aiPlayer.windowControls.onFullscreenChanged(v => window.__testFullscreen = v)`)
   const sources = [original, ...['mpeg4.mp4', 'mpeg4.avi', 'wmv.wmv', 'mpeg2.ts', 'ffv1.mkv', 'prores.mov', 'h264.mp4', 'h264-ac3.mkv', 'audio.wma', 'audio.aiff', 'audio.ac3', 'audio.flac', 'audio.opus'].map(n => path.join(matrix, n))]
   for (let index = 0; index < sources.length; index++) {
