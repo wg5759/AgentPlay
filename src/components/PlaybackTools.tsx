@@ -23,7 +23,7 @@ export default function PlaybackTools({ source, time, duration, visible, getCue,
     if (!api || busyRef.current) return
     if (subtitles && (!cue || !text.trim() || /[《》]/.test(text))) { setStatus('请输入字幕文字，暂不支持书名号分隔符。'); return }
     if (!subtitles && (range.start === undefined || range.end === undefined || range.start < 0 || range.end <= range.start || range.end > duration)) { setStatus('请标记有效的起点和终点。'); return }
-    const instruction = subtitles && cue ? `把字幕 "${cue.path}" 第${cue.index}条改成《${text.trim()}》` : `保留${range.start}到${range.end}秒`
+    const instruction = subtitles && cue ? `把字幕 "${cue.path}" 第${cue.index}条改成《${text.trim()}》` : `保留第${range.start}秒到第${range.end}秒`
     const store = useAgentStore.getState()
     const id = store.startTask({ kind: 'media', label: subtitles ? '修改当前字幕' : '剪出选段', phase: 'running', instruction, source })
     busyRef.current = true; setBusy(true); setStatus('正在生成新版本…')
