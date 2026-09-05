@@ -1,71 +1,55 @@
-# AgentPlay 5 分钟上手
+# AgentPlay 快速上手
 
-## 1. 先确认你下载的是哪一版
+[English](QUICK_START.en.md)
 
-公开稳定版是 `0.7.6`，下载入口只认 [GitHub Releases](https://github.com/wg5759/AgentPlay/releases)。最新测试通道是 [0.9.1 Preview 2](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.2)，只提供给愿意核对 SHA-256 的测试者，并明确标注 `NotSigned`；未签名版本不会冒充稳定版。
+## 1. 下载当前公开预览版
 
-Windows 安装包尚未取得 Authenticode 签名，系统可能显示“未知发布者”。下载后请在 PowerShell 核对发布页给出的 SHA-256：
+当前测试入口是 [0.9.1 Preview 3](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3)。它尚未取得 Authenticode 签名（NotSigned），适合愿意核对文件来源和SHA-256的测试者。历史稳定版标签0.7.6也未签名，只作历史与回滚入口，不是本指南推荐的测试版本。
+
+从同一个官方发布页选择一个包即可：
+
+- **普通安装**：AgentPlay-0.9.1-Windows-x64-Standard.exe，适合希望有开始菜单入口的用户。
+- **免安装体验**：AgentPlay-0.9.1-Windows-x64-Portable.zip，完整解压后运行AgentPlay.exe，不要直接在压缩包里启动。
+
+同时下载该页的AgentPlay-0.9.1-SHA256SUMS.txt，核对对应文件这一行的哈希：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 -LiteralPath '.\AgentPlay-0.7.6-Windows-x64-Standard.exe'
+Get-FileHash -Algorithm SHA256 -LiteralPath '.\AgentPlay-0.9.1-Windows-x64-Standard.exe'
 ```
 
-只有文件来自官方 Release 且哈希完全一致时才继续安装；不要从群聊、网盘或第三方下载站获取安装包。
+只有来源与哈希均正确才继续。Windows可能显示“未知发布者”；校验不能消除SmartScreen，不要关闭系统保护或运行来源不明的远程脚本。
 
-后续版本会区分 Preview、Beta 和 Stable。Preview/Beta 是 GitHub Prerelease，可以在明确标注未签名且校验资产齐全时供测试；Stable 面向普通用户，要求安装包和主程序都具备有效数字签名。命令行安装不会消除 SmartScreen，也不应通过修改系统安全设置强行绕过。
+## 2. 三分钟首次任务：本地播放，不用云模型
 
-## 2. 不用配置模型也能做的事
+这是一个小任务流程，不是性能承诺；不包含下载、安装或首次兼容准备时间。
 
-- 拖入或双击本地视频进行播放。
-- 粘贴 B站、YouTube、抖音、X 或 Facebook 链接，选择“仅下载”。
-- 打开图片、PDF、Word、Excel、PPT 等办公文件进行预览。
-- 执行本地文档转换、PDF 合并拆分和明确的表格公式写入。
+1. 准备一段自己已有、可正常播放的短视频，打开AgentPlay后把它拖进去。
+2. 确认视频仍按原比例显示；有音轨的文件应有声音，无声素材则只检查画面。
+3. 按空格暂停和继续，拖动进度条。若主动进入全屏，按ESC退出，再确认仍能播放。
+4. 在播放记录里找到原视频。到这里才算完成首次验证，不以“正在处理”或亮起进度点作为完成。
 
-这些基础能力不应该因为没有 Key 或本地模型而失效。
+这个任务不需要API Key，也不需要先下载大语言模型。部分格式仍需要网络获取解码组件或准备本地缓存；等待期间原文件不会被替换。若黑屏、比例不对、无法退出或组件报错，停在这里反馈，不要反复提交同一任务。
 
-## 3. 需要 AI 时只选一种使用方式
+公开Preview 3与未发布候选必须区分：首启组件及后续窗口/字幕加固正在[PR #44](https://github.com/wg5759/AgentPlay/pull/44)中；只有新版本正式出现在Releases后才按该发布页更新，不把源码分支或候选包当成已公开的Preview 4。
 
-- **智能选择**：在已经接入且获得授权的模型中，按能力、成功率和质量选择。
-- **只在本机**：内容不交给云端模型；未安装本地组件时会给出唯一的下载入口。
-- **优先效果**：使用已接入的云端模型；发送媒体、字幕或文档内容前仍需按任务授权。
+## 3. 需要AI时再连接模型
 
-日常无需理解厂商地址、上下文长度或路由分数。只有接入自建服务、Ollama、LM Studio、vLLM、llama.cpp 或 Unlimited-OCR 时才展开高级设置。
+- **智能选择**：从已连接且获授权的模型中选择，不会凭空提供云端额度。
+- **只在本机**：使用可选本地组件，效果与速度受本机硬件影响。
+- **优先效果**：使用已接入的云端模型，上云前按任务确认。
 
-API Key 只应粘贴到 AgentPlay 的模型接入界面。不要把 Key 发到 Issue、Discussion、日志或截图中。
+API Key只粘贴到应用的模型连接表单，不发到聊天、Issue、截图或日志。安装AgentPlay不自动赠送云模型额度。
 
-## 4. 常见工作流
+基础播放成功后，再试粘贴链接并选“仅下载”；想要报告则选“下载并拉片”。拉片分内容精华与专业视听/AI复刻两部分，不是恢复原作者的原始提示词。字幕翻译和文档总结在模型连接后再测试。
 
-### 下载视频
+## 4. 卡住时怎样反馈
 
-粘贴链接后选择“仅下载”。任务卡应显示真实下载进度，完成后给出本地文件入口；不会自动进入拉片流程。
+提供版本、Windows版本、想完成的动作、文件扩展名/编码（若知道）、停在哪一步及脱敏截图；无需发送原视频或文档。
 
-### 下载并拉片
+日志通常在%APPDATA%\ai-player\logs\。发送前删去Key、Cookie、账号、私人路径与文件正文。
 
-选择“下载并拉片”。下载完成后，拉片作为独立的可恢复任务继续执行。报告应分为“视频讲了什么”和“专业视听拆解与 AI 复刻”两部分。
+- [Bug报告](https://github.com/wg5759/AgentPlay/issues/new?template=bug_report.yml)
+- [使用问答](https://github.com/wg5759/AgentPlay/discussions/categories/q-a)
+- [私密安全报告](https://github.com/wg5759/AgentPlay/security/advisories/new)
 
-### 字幕翻译
-
-打开视频后选择翻译字幕。原字幕为英文时默认显示中文；原字幕为中文时默认显示英文。翻译字幕只显示目标语言，位置可在播放器内调整。
-
-### 文档处理
-
-选择、粘贴或拖入文档后先预览，再在同一输入框描述结果，例如“整理成 Word”“提取表格”“把这两份合同做差异说明”。涉及云端改写、总结或生成时，AgentPlay 会在发送内容前请求授权。
-
-## 5. 任务、日志与反馈
-
-长任务会写入主进程持久检查点。应用关闭、崩溃或重启后，可恢复任务应从检查点继续；无法自动恢复时必须说明失败原因和可采取的下一步。
-
-Windows 日志通常位于：
-
-```text
-%APPDATA%\ai-player\logs\
-```
-
-提交反馈前请删除 API Key、Cookie、本地绝对路径、文件正文和个人信息：
-
-- 使用问题与排障：[GitHub Discussions](https://github.com/wg5759/AgentPlay/discussions/categories/q-a)
-- 可复现缺陷：[Bug 报告](https://github.com/wg5759/AgentPlay/issues/new?template=bug_report.yml)
-- 功能想法：[Ideas](https://github.com/wg5759/AgentPlay/discussions/categories/ideas)
-- 安全漏洞：[私密报告](https://github.com/wg5759/AgentPlay/security/advisories/new)
-
-更多边界见 [支持说明](../SUPPORT.md)、[隐私说明](../PRIVACY.md) 与 [多平台状态](../MULTIPLATFORM.md)。
+更多说明：[支持](../SUPPORT.md)、[隐私](../PRIVACY.md)、[平台边界](../MULTIPLATFORM.md)。

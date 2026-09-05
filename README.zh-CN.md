@@ -12,7 +12,7 @@
   <a href="README.md">English</a> ·
   <a href="https://wg5759.github.io/AgentPlay/">项目官网</a> ·
   <a href="docs/assets/promo/agentplay-demo.mp4">45 秒演示</a> ·
-  <a href="#下载">下载稳定版</a> ·
+  <a href="https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3">下载预览版</a> ·
   <a href="docs/QUICK_START.md">5 分钟上手</a> ·
   <a href="https://github.com/wg5759/AgentPlay/discussions">交流与问答</a> ·
   <a href="CONTRIBUTING.md">参与贡献</a>
