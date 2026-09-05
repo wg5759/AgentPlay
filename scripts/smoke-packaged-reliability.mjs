@@ -109,14 +109,16 @@ try {
     if (cloud) {
       const config = await page.evaluate("window.aiPlayer.models.config('chat')")
       receipt.model = { providerId: config.providerId, model: config.model }
+      if (!process.argv.includes('--document-only')) {
       receipt.capabilities = await page.evaluate(`window.aiPlayer.models.verify({role:'chat',providerId:${JSON.stringify(config.providerId)},model:${JSON.stringify(config.model)},useSavedKey:true})`)
       assert.equal(receipt.capabilities.success, true, 'real text capability')
       const cases = [ ['不要录屏，我只是想知道这个功能怎么用','ask'], ['查重会不会删除我的原文件？','ask'], ['先别压缩，文件太大是不是码率高？','ask'], ['如果以后想剪辑视频，应该怎么做？','ask'], ['我只想了解字幕翻译的费用，请别开始翻译。','ask'], ['请将当前视频的字幕翻译成英文','execute'], ['帮我把这个视频里的重复句子删掉','execute'], ['请把这份材料改写成一段简短介绍','execute'] ]
       receipt.intentCases = []
       for (let index=0; index<cases.length; index++) { const [text, expected]=cases[index]; const started=Date.now(); const result=await page.evaluate(`window.aiPlayer.ai.interpretIntent({text:${JSON.stringify(text)},requestId:'intent-acceptance-${index}',materials:[{name:'demo.mp4',type:'active-video'},{name:'facts.txt',type:'.txt'}],history:[]})`); receipt.intentCases.push({text,expected,actual:result.kind,error:result.error,latencyMs:Date.now()-started}); assert.equal(result.kind,expected,`${text}: ${result.error || ''}`) }
-      const attached = await page.evaluate(`window.aiPlayer.chat.attachPaths([${JSON.stringify(facts)}])`)
-      assert.ok(attached.documents?.[0]?.token)
-      const answer = await page.evaluate(`window.aiPlayer.ai.chat([{role:'user',content:'这份合成文档的租赁到期日是什么？'}],null,'chat-document-proof',{mode:'ask',documentTokens:[${JSON.stringify(attached.documents[0].token)}]})`)
+      } else receipt.modelClassificationNotRun = true
+      const attached = await page.evaluate(`window.aiPlayer.documents.attachPaths([${JSON.stringify(facts)}])`)
+      assert.ok(attached?.[0]?.token)
+      const answer = await page.evaluate(`window.aiPlayer.ai.chat([{role:'user',content:'这份合成文档的租赁到期日是什么？'}],null,'chat-document-proof',{mode:'ask',documentTokens:[${JSON.stringify(attached[0].token)}]})`)
       assert.match(answer.text, /2030/); assert.equal(answer.toolResults.length, 0)
       receipt.checks.readOnlyDocumentQuestion = true
     }

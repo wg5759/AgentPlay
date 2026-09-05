@@ -6,12 +6,13 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const releaseDirectory = path.resolve(root, process.argv.find(value => value.startsWith('--release-dir='))?.slice('--release-dir='.length) || 'release')
 const require = createRequire(import.meta.url)
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 const asar = require(path.join(root, 'node_modules', '.pnpm', '@electron+asar@3.4.1', 'node_modules', '@electron', 'asar'))
 const sevenZip = path.join(root, 'node_modules', '.pnpm', '7zip-bin@5.2.0', 'node_modules', '7zip-bin', 'win', 'x64', '7za.exe')
-const standard = path.join(root, 'release', `AgentPlay-标准版安装包-${pkg.version}.exe`)
-const portable = path.join(root, 'release', `AgentPlay-${pkg.version}-Windows-x64-Portable.zip`)
+const standard = path.join(releaseDirectory, `AgentPlay-标准版安装包-${pkg.version}.exe`)
+const portable = path.join(releaseDirectory, `AgentPlay-${pkg.version}-Windows-x64-Portable.zip`)
 
 function sha256(filePath) {
   const hash = crypto.createHash('sha256')
@@ -81,7 +82,7 @@ function authenticode(filePath) {
   return JSON.parse(result.stdout.trim())
 }
 
-const asarPath = path.join(root, 'release', 'win-unpacked', 'resources', 'app.asar')
+const asarPath = path.join(releaseDirectory, 'win-unpacked', 'resources', 'app.asar')
 const asarEntries = asar.listPackage(asarPath)
 for (const required of [
   '\\electron\\creative-studio-service.js',
@@ -106,7 +107,7 @@ const report = {
   },
   signing: {
     installer: authenticode(standard),
-    application: authenticode(path.join(root, 'release', 'win-unpacked', 'AgentPlay.exe'))
+    application: authenticode(path.join(releaseDirectory, 'win-unpacked', 'AgentPlay.exe'))
   },
   closure: {
     standardHasBundledModel: false,
@@ -118,6 +119,6 @@ const report = {
     mpvLicenseAndProvenanceIncluded: true
   }
 }
-const reportPath = path.join(root, 'release', `release-verification-${pkg.version}.json`)
+const reportPath = path.join(releaseDirectory, `release-verification-${pkg.version}.json`)
 fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`)
 process.stdout.write(`${JSON.stringify(report)}\n`)
