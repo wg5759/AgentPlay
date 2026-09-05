@@ -40,6 +40,8 @@ try {
   const extracting = path.join(profile, 'yt-dlp', site.assets[1].files[0].path + '.tmp')
   await until(() => fs.existsSync(extracting), 'real FFmpeg worker extraction', 90000)
   receipt.extractionObservedAt = Date.now()
+  receipt.diagnosticDeferredReveal = process.argv.includes('--diagnose-deferred-reveal')
+  if (receipt.diagnosticDeferredReveal) await main.command('Runtime.evaluate', {expression: `(() => {const e=process.getBuiltinModule('module').createRequire(process.execPath)('electron');for(const w of e.BrowserWindow.getAllWindows()){const show=w.show.bind(w),focus=w.focus.bind(w);let pending;const later=()=>{clearTimeout(pending);pending=setTimeout(()=>{if(!w.isDestroyed()){show();focus()}},250)};w.show=later;w.focus=later}return true})()`, returnByValue:true},15000)
   const results = []
   for (const file of media) {
     const start = Date.now(), processChild = spawn(exe, [`--user-data-dir=${profile}`, file], { windowsHide: true, stdio: 'ignore' })
@@ -53,7 +55,7 @@ try {
   }
   receipt.forwarding = await Promise.all(results)
   receipt.telemetry = await main.evaluate('__burst')
-  assert.ok(receipt.forwarding.every(item => item.code === 0 && !item.timeout), 'every forwarded process must exit within original 15s deadline')
+  receipt.forwardingPassed=receipt.forwarding.every(item => item.code === 0 && !item.timeout)
   await until(async () => (await main.evaluate('__burst.events')).length === media.length, 'all second-instance receipts', 15000)
   receipt.telemetry = await main.evaluate('__burst')
   assert.ok(media.every(file => receipt.telemetry.events.some(event => event.argv.includes(file))))
@@ -64,6 +66,7 @@ try {
   page=await connectCdp(renderer,'page')
   const expected=receipt.telemetry.events.at(-1).argv.find(value=>media.includes(value))
   receipt.visible = await until(async () => {const state=await page.evaluate(`(() => {const m=document.querySelector('[data-ai-player-video]');return {src:m?.currentSrc,ready:m?.readyState,history:JSON.parse(localStorage.getItem('ai-player-store')||'{}').state?.recentMedia?.[0]}})()`);return state.src && decodeURIComponent(state.src).replaceAll('\\','/').includes(path.basename(expected)) && state.ready>=2 && state}, 'last delivered file loaded in original player', 60000)
+  assert.ok(receipt.forwardingPassed, 'every forwarded process must exit within original 15s deadline')
   receipt.passed=true
 } catch(error) {receipt.passed=false;receipt.error=error.message;process.exitCode=1;try {receipt.telemetry=await main?.evaluate('__burst')}catch{}}
 finally {
