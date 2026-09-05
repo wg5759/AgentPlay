@@ -252,8 +252,9 @@ class AgentEngine {
   localCommand(text) {
     const input = String(text || '').trim()
     if (!input) return null
+    if (/^(?:请|帮我)?(?:退出全屏|恢复原始窗口)[。！!\s]*$/.test(input)) return ['set_window_preset', { preset: 'original' }]
 
-    if (/暂停|停一下|先停|pause/i.test(input)) return ['pause', {}]
+    if (/暂停|停一下|先停|停止播放|pause/i.test(input)) return ['pause', {}]
     if (/继续(?:播放)?|恢复播放|接着播|开始播放|^播放(?:一下)?$|resume/i.test(input)) return ['resume', {}]
 
     if (/取消静音|解除静音|恢复声音|打开声音/.test(input)) return ['set_mute', { muted: false }]
@@ -293,7 +294,7 @@ class AgentEngine {
     if (/铺满窗口|填满窗口|最大化窗口/.test(input)) return ['set_window_preset', { preset: 'fill' }]
     if (/全屏(?:窗口|播放)?|进入全屏/.test(input)) return ['set_window_preset', { preset: 'fullscreen' }]
 
-    if (/完整(?:地)?(?:显示|呈现|看)|看全|看到全部|全部(?:显示|呈现)|不要(?:裁剪|截掉)|不裁剪|适应窗口|保持(?:原始)?比例/.test(input)) {
+    if (/完整(?:地)?(?:显示|呈现|看)|看全|看到全部|全部(?:显示|呈现)|不要(?:裁剪|截掉)|不裁剪|适应窗口|保持(?:原始|原)?比例/.test(input)) {
       return ['set_picture_mode', { mode: 'fit' }]
     }
     if (/原始(?:画面|比例|尺寸)/.test(input)) return ['set_picture_mode', { mode: 'original' }]
@@ -452,7 +453,7 @@ class AgentEngine {
       // 2026-08-24 agnes-2.5-flash 已真实单图返回；仍保留2.0作为端点明确报不支持图片时的历史兼容回退。
       const config = typeof options.apiKey === 'object' && options.apiKey !== null ? options.apiKey : null
       const message = String(error?.message || '')
-      const unsupported = /504|400|multimodal|does not support|unsupported.*(image|vision|media|modality)|invalid.*(image|image_url|content)|(不支持|不接受).{0,4}(图|图片|图像|多模态)/i.test(message)
+      const unsupported = /(?:does not support|unsupported).*(image|vision|media|modality|multimodal)|(?:image|vision|multimodal).*(?:unsupported|not supported)|(不支持|不接受).{0,4}(图|图片|图像|多模态)/i.test(message)
       if (config?.providerId === 'agnes' && config.model !== 'agnes-2.0-flash' && unsupported) {
         return this.completeVisionMultiOnce({ ...options, apiKey: { ...config, model: 'agnes-2.0-flash' } })
       }
@@ -582,7 +583,8 @@ class AgentEngine {
     const latestText = messages.length > 0 ? String(messages[messages.length - 1].content || '') : ''
     const capabilityAnswer = productCapabilityAnswer(latestText)
     if (capabilityAnswer) return finish({ text: capabilityAnswer, toolResults: [] })
-    const local = this.localCommand(latestText)
+    const { directIntent } = await import('./intent-policy.mjs')
+    const local = directIntent(latestText)?.route === 'player' ? this.localCommand(latestText) : null
     if (local) {
       if (!runtime.canUseTool(local[0])) {
         return finish({ text: `当前为${runtime.label}模式：${runtime.description}。`, toolResults: [] })

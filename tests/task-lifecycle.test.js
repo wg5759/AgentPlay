@@ -16,6 +16,14 @@ const { createWorkspaceTask, patchWorkspaceTask, restoreWorkspaceTasks, progress
 
 after(() => stop())
 
+test('workspace restore never drops unfinished tasks when history exceeds its display limit', () => {
+  const pending = Array.from({ length: 205 }, (_, i) => createWorkspaceTask({ id: `pending-${i}`, phase: 'waiting' }, i + 1))
+  const history = Array.from({ length: 100 }, (_, i) => createWorkspaceTask({ id: `done-${i}`, phase: 'completed' }, i + 1000))
+  const restored = restoreWorkspaceTasks([...history, ...pending], 2000)
+  assert.equal(restored.filter(task => task.id.startsWith('pending-')).length, 205)
+  assert.equal(restored.filter(task => task.id.startsWith('done-')).length, 80)
+})
+
 test('workspace task lifecycle records durable identity and terminal results', () => {
   const task = createWorkspaceTask({ kind: 'download', label: '视频下载', instruction: '下载链接' }, 100)
   assert.match(task.id, /^task-100-/)

@@ -1,4 +1,7 @@
 declare module '*.mjs' {
+  export function positionVttContent(content: string, position: 'high' | 'middle' | 'low'): string
+  export function findSubtitleOrdinal(content: string, start: number, end: number): number | null
+  export function directIntent(text: unknown): { kind: string; route?: string; source?: string } | null
   export interface WorkspaceJourneyTask {
     kind?: string
     phase?: string
@@ -417,7 +420,10 @@ interface LongVideoVersionPlanV1 {
 }
 
 interface AiPlayerAPI {
+  buildInfo?: { version: string; commit?: string; sourceSha256?: string }
   inlinePlayback?: {
+    cacheStatus: () => Promise<{ bytes: number; limitBytes: number; reclaimableBytes: number }>
+    clearUnusedCache: () => Promise<{ success: boolean; removedBytes?: number; error?: string }>
     prepare: (input: { requestId: string; sourcePath: string; kind: 'video' | 'audio'; preflight?: boolean }) => Promise<{ success: boolean; path?: string; cached?: boolean; kind?: 'video' | 'audio'; duration?: number; backend?: string; cancelled?: boolean; error?: string }>
     cancel: (requestId: string) => Promise<boolean>
     onProgress: (cb: (progress: { requestId: string; phase: string; percent?: number }) => void) => () => void
@@ -896,6 +902,7 @@ interface AiPlayerAPI {
     save: (dataUrl: string, suggestedName: string) => Promise<boolean>
   }
   models?: {
+    verify: (input: { role: string; providerId: string; model: string; baseUrl?: string; apiKey?: string; useSavedKey?: boolean }) => Promise<{ success: boolean; message: string; text?: string; vision?: string; tools?: string; testedAt?: number }>
     providers: () => Promise<Array<{
       id: string; name: string; region: string; protocol: 'openai' | 'anthropic' | 'gemini';
       baseUrl: string; models: string[]; requiresKey: boolean; modelHint?: string; warning?: string;
@@ -961,6 +968,7 @@ interface AiPlayerAPI {
     onStatus: (cb: (event: { requestId: string; status: string }) => void) => () => void
   }
   subtitle?: {
+    openLocal: () => Promise<{ path?: string; error?: string }>
     search: (name: string) => Promise<{ success: boolean; data?: Array<{ id: string; fileId: number; fileName: string; language: string; release: string }>; error?: string }>
     download: (fileId: number) => Promise<{ success: boolean; path?: string; fileName?: string; error?: string }>
   }
@@ -993,6 +1001,7 @@ interface AiPlayerAPI {
     getPathForFile: (file: File) => string
   }
   ai?: {
+    interpretIntent: (input: { text: string; requestId: string; materials: Array<{ name: string; type: string }>; history?: Array<{ role: string; text: string }> }) => Promise<{ kind: string; route?: string; question?: string; error?: string }>
     chat: (messages: Array<{ role: string; content: string }>, context?: {
       name: string | null
       path: string | null
@@ -1004,7 +1013,7 @@ interface AiPlayerAPI {
       pictureMode: 'original' | 'fit' | 'fill' | 'stretch'
       subtitleVisible: boolean
       isFullscreen: boolean
-    }, requestId?: string, agentOptions?: { mode?: AgentMode }) => Promise<{
+    }, requestId?: string, agentOptions?: { mode?: AgentMode; documentTokens?: string[] }) => Promise<{
       requestId: string
       text: string
       cancelled?: boolean

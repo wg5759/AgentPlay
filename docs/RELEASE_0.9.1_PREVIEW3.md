@@ -1,5 +1,7 @@
 # AgentPlay 0.9.1 Preview 3 发布回执
 
+收尾边界：产品代码 PR #42 与 Release 已完成；文档 PR #43 于2026-09-04获得用户明确合并授权并合并为 `4375874`。私有知识库历史归档动作仍未执行。9月4日另有[仅桌面窗口修复](WINDOW_MODE_RECOVERY_20260904.md)，不修改此处 Preview 3 的既有发布资产与哈希。
+
 - 发布时间：2026-09-02 14:08:05（北京时间）。
 - 公开版本：[v0.9.1-preview.3](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3)，未签名 Prerelease；不是签名 Stable。
 - 源码：[PR #42](https://github.com/wg5759/AgentPlay/pull/42) 已合并，发布 tag 指向 `65659f143db8ddaa6034d29c1a63e48c278f5cf1`。
@@ -18,4 +20,3 @@
 兼容媒体在原播放区使用本机缓存，原片不变；这不是 libmpv 直接嵌入，不承诺损坏/DRM、HDR、多音轨及所有长度都能无损播放，首次准备与 4 GiB 缓存上限有明确提示。macOS/Linux 实机与签名 Stable 不计为本次完成。
 
 另有两个独立维护项保留：部分空白 profile 的可选组件自动安装返回错误；Dependabot 重建 React 等升级 PR 出现 updater 错误。它们不应冒充本版主线质量门失败或已修复，也不能据此升级不相关大版本。此次匿名下载为维护者验收，不计为外部用户增长。
-

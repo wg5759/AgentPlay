@@ -451,22 +451,42 @@ class MediaEditService {
     if (!(outputDuration > 0)) return { ...proofBase, verdict: 'unavailable', reason: 'output-duration-missing' }
     const firstCache = new Map()
     const lastCache = new Map()
-    const sampleAt = async (file, seconds, frameOptions = {}) => {
-      const at = Math.max(0, Number(seconds.toFixed(3)))
-      const key = `${file}\n${at.toFixed(3)}\n${Number(frameOptions.fitWidth || 0)}x${Number(frameOptions.fitHeight || 0)}`
-      if (!firstCache.has(key)) firstCache.set(key, await this.frames.readGrayFrame(file, at, { signal, ...frameOptions }))
-      return firstCache.get(key)
+    const request = (file, seconds, kind, options = {}) => {
+      const at = Math.max(kind === 'last' ? 0.02 : 0, Number(seconds.toFixed(3)))
+      const fitWidth = Number(options.fitWidth || 0), fitHeight = Number(options.fitHeight || 0)
+      return { file, at, kind, fitWidth, fitHeight, key: `${file}\n${kind}\n${at.toFixed(3)}\n${fitWidth}x${fitHeight}` }
     }
-    const sampleLast = async (file, boundary, frameOptions = {}) => {
-      const at = Math.max(0.02, Number(boundary.toFixed(3)))
-      const key = `${file}\n${at.toFixed(3)}\n${Number(frameOptions.fitWidth || 0)}x${Number(frameOptions.fitHeight || 0)}`
-      if (!lastCache.has(key)) {
-        const frame = typeof this.frames.readLastGrayFrame === 'function'
-          ? await this.frames.readLastGrayFrame(file, at, { signal, ...frameOptions })
-          : await sampleAt(file, Math.max(0.02, at - 0.06), frameOptions)
-        lastCache.set(key, frame)
+    const sampleAt = (file, at, options) => request(file, at, 'first', options)
+    const sampleLast = (file, at, options) => request(file, at, 'last', options)
+    const cacheFor = item => item.kind === 'last' ? lastCache : firstCache
+    const readOne = async item => {
+      if (!item) return null
+      const cache = cacheFor(item)
+      if (!cache.has(item.key)) {
+        const options = { signal, fitWidth: item.fitWidth, fitHeight: item.fitHeight }
+        cache.set(item.key, item.kind === 'last' && typeof this.frames.readLastGrayFrame === 'function'
+          ? this.frames.readLastGrayFrame(item.file, item.at, options)
+          : this.frames.readGrayFrame(item.file, item.kind === 'last' ? Math.max(0.02, item.at - 0.06) : item.at, options))
       }
-      return lastCache.get(key)
+      return cache.get(item.key)
+    }
+    const sampleMany = async readers => {
+      const requests = readers.map(read => read())
+      const missing = requests.filter(item => item && !cacheFor(item).has(item.key))
+      if (missing.length > 1 && typeof this.frames.readProofFrames === 'function') {
+        try {
+          const frames = await this.frames.readProofFrames(missing, { signal })
+          for (const item of missing) if (frames?.get(item.key)?.length === 1024) cacheFor(item).set(item.key, frames.get(item.key))
+        } catch (error) { if (signal?.aborted) throw error }
+      }
+      const results = []
+      for (let index = 0; index < requests.length; index += 2) {
+        const batch = await Promise.allSettled(requests.slice(index, index + 2).map(readOne))
+        const failed = batch.find(item => item.status === 'rejected')
+        if (failed) throw failed.reason
+        results.push(...batch.map(item => item.value))
+      }
+      return results
     }
     const boundaries = []
     for (let index = 0; index < normalized.length; index += 1) {
@@ -476,40 +496,21 @@ class MediaEditService {
       const sourceFrameOptions = segment.frameFitWidth > 0 && segment.frameFitHeight > 0 ? { fitWidth: segment.frameFitWidth, fitHeight: segment.frameFitHeight } : {}
       const segmentDuration = segment.sourceEndSeconds - segment.sourceStartSeconds
       const delta = Math.min(0.5, Math.max(0.1, segmentDuration / 3))
-      const outputFirstCandidates = [
-        await sampleAt(output, segment.targetStartSeconds),
-        await sampleAt(output, segment.targetStartSeconds + 0.067),
-        await sampleAt(output, segment.targetStartSeconds + 0.134)
-      ].filter(Boolean)
-      const sourceFirstCandidates = [
-        await sampleAt(segmentSource, segment.sourceStartSeconds, sourceFrameOptions),
-        await sampleAt(segmentSource, segment.sourceStartSeconds + 0.067, sourceFrameOptions),
-        await sampleAt(segmentSource, Math.max(0, segment.sourceStartSeconds - 0.067), sourceFrameOptions),
-        await sampleAt(segmentSource, segment.sourceStartSeconds + 0.134, sourceFrameOptions)
-      ].filter(Boolean)
-      const firstAlternatives = [
-        segment.sourceStartSeconds - delta >= 0 ? await sampleAt(segmentSource, segment.sourceStartSeconds - delta, sourceFrameOptions) : null,
-        segment.sourceStartSeconds + delta < segmentSourceDuration ? await sampleAt(segmentSource, segment.sourceStartSeconds + delta, sourceFrameOptions) : null
-      ]
-      const outputLastCandidates = [
-        await sampleLast(output, segment.targetEndSeconds - 0.001),
-        await sampleLast(output, segment.targetEndSeconds + 0.067),
-        await sampleLast(output, segment.targetEndSeconds - 0.134)
-      ].filter(Boolean)
-      const sourceLastCandidates = [
-        await sampleLast(segmentSource, segment.sourceEndSeconds - 0.001, sourceFrameOptions),
-        await sampleLast(segmentSource, segment.sourceEndSeconds + 0.067, sourceFrameOptions),
-        await sampleLast(segmentSource, segment.sourceEndSeconds - 0.134, sourceFrameOptions),
-        await sampleLast(segmentSource, segment.sourceEndSeconds + 0.201, sourceFrameOptions),
-        await sampleLast(segmentSource, segment.sourceEndSeconds - 0.268, sourceFrameOptions),
-        await sampleAt(segmentSource, Math.max(segment.sourceStartSeconds, segment.sourceEndSeconds - 0.061), sourceFrameOptions),
-        await sampleAt(segmentSource, Math.max(segment.sourceStartSeconds, segment.sourceEndSeconds - 0.094), sourceFrameOptions),
-        await sampleAt(segmentSource, Math.max(segment.sourceStartSeconds, segment.sourceEndSeconds - 0.127), sourceFrameOptions)
-      ].filter(Boolean)
-      const lastAlternatives = [
-        segment.sourceEndSeconds - delta >= 0 ? await sampleLast(segmentSource, segment.sourceEndSeconds - delta, sourceFrameOptions) : null,
-        segment.sourceEndSeconds + delta < segmentSourceDuration ? await sampleLast(segmentSource, segment.sourceEndSeconds + delta, sourceFrameOptions) : null
-      ]
+      const outputFirstCandidates = (await sampleMany([0, 0.067, 0.134].map(offset => () => sampleAt(output, segment.targetStartSeconds + offset)))).filter(Boolean)
+      const sourceFirstCandidates = (await sampleMany([segment.sourceStartSeconds, segment.sourceStartSeconds + 0.067, Math.max(0, segment.sourceStartSeconds - 0.067), segment.sourceStartSeconds + 0.134].map(at => () => sampleAt(segmentSource, at, sourceFrameOptions)))).filter(Boolean)
+      const firstAlternatives = await sampleMany([
+        () => segment.sourceStartSeconds - delta >= 0 ? sampleAt(segmentSource, segment.sourceStartSeconds - delta, sourceFrameOptions) : null,
+        () => segment.sourceStartSeconds + delta < segmentSourceDuration ? sampleAt(segmentSource, segment.sourceStartSeconds + delta, sourceFrameOptions) : null
+      ])
+      const outputLastCandidates = (await sampleMany([-0.001, 0.067, -0.134].map(offset => () => sampleLast(output, segment.targetEndSeconds + offset)))).filter(Boolean)
+      const sourceLastCandidates = (await sampleMany([
+        ...[-0.001, 0.067, -0.134, 0.201, -0.268].map(offset => () => sampleLast(segmentSource, segment.sourceEndSeconds + offset, sourceFrameOptions)),
+        ...[-0.061, -0.094, -0.127].map(offset => () => sampleAt(segmentSource, Math.max(segment.sourceStartSeconds, segment.sourceEndSeconds + offset), sourceFrameOptions))
+      ])).filter(Boolean)
+      const lastAlternatives = await sampleMany([
+        () => segment.sourceEndSeconds - delta >= 0 ? sampleLast(segmentSource, segment.sourceEndSeconds - delta, sourceFrameOptions) : null,
+        () => segment.sourceEndSeconds + delta < segmentSourceDuration ? sampleLast(segmentSource, segment.sourceEndSeconds + delta, sourceFrameOptions) : null
+      ])
       if (!outputFirstCandidates.length || !sourceFirstCandidates.length || !outputLastCandidates.length || !sourceLastCandidates.length) {
         return { ...proofBase, verdict: 'unavailable', reason: 'frame-sample-missing', segmentIndex: index }
       }

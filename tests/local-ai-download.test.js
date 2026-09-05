@@ -104,6 +104,36 @@ function tempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix))
 }
 
+test('engine-only component packs finish without inventing a model asset', async (t) => {
+  const body = Buffer.from('fixture-tool')
+  const { server, port } = await serve({ '/tool': { body } })
+  const installRoot = tempDir('toolpack-e2e-')
+  t.after(() => { server.close(); fs.rmSync(installRoot, { recursive: true, force: true }) })
+  const manifest = { schemaVersion: 1, tag: 'tool-fixture', assets: [{ id: 'tool', kind: 'file', role: 'engine', path: 'tool.exe', url: `http://127.0.0.1:${port}/tool`, size: body.length, sha256: sha256(body) }] }
+  const service = new LocalAiDownloadService({ installRoot, manifest, localOnly: true })
+  await service.start()
+  assert.equal(service.status().installed, true)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(installRoot, 'bundled-ai-manifest.json'))).model, undefined)
+})
+
+test('zip entry identity and installation path are separate and both hash-checked', async (t) => {
+  const pack = await makePack()
+  const manifest = buildManifest('http://127.0.0.1:1', pack)
+  const engine = manifest.assets.find(asset => asset.kind === 'zip')
+  const zip = new JSZip()
+  pack.runtimeFiles.forEach((file, i) => { const entry = `Release/file-${i}`; zip.file(entry, file.buffer); engine.files[i].archivePath = entry })
+  const body = await zip.generateAsync({ type: 'nodebuffer' })
+  engine.size = body.length; engine.sha256 = sha256(body)
+  const { server, port } = await serve({ '/model': { body: pack.modelBuffer }, '/runtime': { body } })
+  manifest.assets.forEach(asset => { asset.url = asset.url.replace(':1/', `:${port}/`) })
+  const installRoot = tempDir('zip-entry-e2e-')
+  t.after(() => { server.close(); fs.rmSync(installRoot, { recursive: true, force: true }) })
+  await new LocalAiDownloadService({ installRoot, manifest, localOnly: true }).start()
+  for (const file of pack.runtimeFiles) assert.equal(sha256(fs.readFileSync(path.join(installRoot, file.path))), sha256(file.buffer))
+  engine.files[0].archivePath = '../escape'
+  assert.throws(() => validateManifest(manifest), /路径/)
+})
+
 test('local AI pack downloads, verifies, extracts and writes a runtime-compatible manifest', async (t) => {
   const pack = await makePack()
   const { server, port } = await serve({

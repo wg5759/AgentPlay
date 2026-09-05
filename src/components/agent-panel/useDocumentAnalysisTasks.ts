@@ -71,14 +71,14 @@ export default function useDocumentAnalysisTasks(options: DocumentAnalysisTaskOp
     }
   }, [])
 
-  const runDocumentTask = async (forceApprove = false, instructionOverride = '', forceLocal = false) => {
+  const runDocumentTask = async (forceApprove = false, instructionOverride = '', forceLocal = false, newRequest = false) => {
     const api = window.aiPlayer?.documents
     const instruction = forceApprove ? docInstructionRef.current : instructionOverride || inputText.trim()
     if (!api || !instruction || busyRef.current) return
     busyRef.current = true
     docInstructionRef.current = instruction
     const files = attachments
-    if (!forceApprove && !instructionOverride) {
+    if ((!forceApprove && !instructionOverride) || newRequest) {
       addMessage('user', `${instruction}\n（附件：${files.map((file) => file.name).join('、')}）`)
       setInputText('')
     }

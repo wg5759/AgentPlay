@@ -127,7 +127,7 @@ if (includeHistory) {
 }
 
 if (includePackaged) {
-  const packagedRoot = path.join(root, 'release', 'win-unpacked', 'resources')
+  const packagedRoot = path.resolve(process.argv.find(value => value.startsWith('--packaged-root='))?.slice('--packaged-root='.length) || path.join(root, 'release', 'win-unpacked', 'resources'))
   for (const fullPath of walk(packagedRoot)) {
     const relative = path.relative(packagedRoot, fullPath)
     if (!isTextPath(relative)) continue

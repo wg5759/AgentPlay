@@ -1,5 +1,10 @@
 # AgentPlay 后续工作清单
 
+## 2026-09-04 窗口生命周期补丁
+
+- [x] `6493f01` 已完成本地实现、完整回归和桌面安装态验收：默认窗口留边距，播完/关闭恢复窗口，常驻退出按钮，控件双击不全屏。见 [窗口修复回执](docs/WINDOW_MODE_RECOVERY_20260904.md)。PR #43 已获用户明确允许并合并为 `4375874`。
+- [ ] 此窗口补丁尚未推送、未生成新的公开安装包；现有 Preview 3 资产不变。
+
 ## 2026-09-02 核心播放热修复（优先于推广）
 
 - [x] 通用本地音视频统一留在原播放区域：[PR #42](https://github.com/wg5759/AgentPlay/pull/42) 已合并至 `65659f1`，桌面同步、14 场景安装态验收、双平台 CI 和 [Preview 3](https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3) 的 9 项匿名下载/哈希闭环均完成。用户明确豁免本轮异源复审；未签名 Preview 与签名 Stable 仍严格区分。详见 [发布回执](docs/RELEASE_0.9.1_PREVIEW3.md)。

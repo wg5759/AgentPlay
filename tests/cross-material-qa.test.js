@@ -84,7 +84,7 @@ test('main, preload and renderer wire cross-material QA through persistent recov
   assert.match(main, /approval: modelRoute\.local \? null : \{ action: 'cloud'/)
   assert.match(main, /ipcMain\.handle\('cross-material:ask'/)
   assert.match(preload, /crossMaterial: \{/)
-  assert.ok(router.indexOf('await runCrossMaterialQuestion(text)') < router.indexOf('await runDocumentTask()'))
+  assert.ok(router.indexOf('await runCrossMaterialQuestion(text)') < router.indexOf('await runDocumentTask(text)'))
   assert.match(hook, /pendingTaskRef\.current = 'cross-qa'/)
   assert.match(hook, /result\.requiresApproval/)
   assert.match(hook, /if \(!waitingApproval\) setTaskStatus\(''\)/)

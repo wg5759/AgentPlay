@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { usePlayerStore } from './playerStore'
-import { createWorkspaceTask, patchWorkspaceTask, progressFromStatus, recordWorkspaceTaskProgress, restoreWorkspaceTasks } from '../taskLifecycle'
+import { createWorkspaceTask, patchWorkspaceTask, progressFromStatus, recordWorkspaceTaskProgress, restoreWorkspaceTasks, retainWorkspaceTasks } from '../taskLifecycle'
 import type { WorkspaceTask, WorkspaceTaskInput, WorkspaceTaskPhase } from '../taskLifecycle'
 import { normalizeAgentMode } from '../../electron/agent-runtime-policy.mjs'
 import type { AgentMode } from '../../electron/agent-runtime-policy.mjs'
@@ -9,6 +9,7 @@ import { applyAgentToolResult, type AgentToolReceipt } from '../agentToolExecuto
 import { dedupeAttachments } from '../attachment-policy.mjs'
 
 export interface AgentMessage {
+  id?: string
   role: 'user' | 'agent'
   text: string
 }
@@ -67,7 +68,7 @@ interface AgentState {
   setListening: (v: boolean) => void
   setInputText: (t: string) => void
   addMessage: (role: 'user' | 'agent', text: string) => void
-  send: (contextNote?: string) => Promise<void>
+  send: (contextNote?: string, options?: { mode?: AgentMode; text?: string; documentTokens?: string[] }) => Promise<void>
   cancel: () => void
 }
 
@@ -95,7 +96,7 @@ export const useAgentStore = create<AgentState>()(
     set((state) => ({
       task: next,
       activeTaskId: next.id,
-      tasks: [next, ...state.tasks.filter((item) => item.id !== next.id)].slice(0, 80)
+      tasks: retainWorkspaceTasks([next, ...state.tasks.filter((item) => item.id !== next.id)])
     }))
     return next.id
   },
@@ -177,13 +178,17 @@ export const useAgentStore = create<AgentState>()(
     const requestId = get().activeRequestId
     if (requestId) void window.aiPlayer?.ai?.cancel(requestId)
   },
-  send: async (contextNote = '') => {
-    const text = get().inputText.trim()
-    if (!text) return
+  send: async (contextNote = '', options = {}) => {
+    const text = (options.text ?? get().inputText).trim()
+    if (!text || get().thinking) return
     get().addMessage('user', text)
     const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
     set({ inputText: '', thinking: true, activeRequestId: requestId })
-    get().addMessage('agent', '思考中…')
+    set(state => ({ messages: [...state.messages, { id: requestId, role: 'agent', text: '思考中…' }] }))
+    const updateReply = (reply: string, finished = false) => set(state => ({
+      messages: state.messages.map(message => message.id === requestId ? { ...message, text: reply } : message),
+      ...(finished && state.activeRequestId === requestId ? { thinking: false, activeRequestId: null } : {})
+    }))
 
     const history = get()
       .messages.filter((m) => m.text !== '思考中…')
@@ -203,16 +208,10 @@ export const useAgentStore = create<AgentState>()(
           queued: '请求已排队…', connecting: '正在连接模型…', loading: '模型正在加载…',
           'cli-connecting': '正在启动订阅通道（约 20-30 秒）…', 'cli-connected': '通道已连接，正在生成…',
           'cli-generating': '订阅模型生成中（约需 1–2 分钟）…',
-          'loading-local-model': '正在校验并启动内置离线模型…'
+          'loading-local-model': '正在校验并启动内置离线模型…',
+          'reading-documents': '正在读取所选文档的相关内容…'
         }
-        set((state) => {
-          const messages = [...state.messages]
-          const last = messages[messages.length - 1]
-          if (last?.role === 'agent') {
-            messages[messages.length - 1] = { ...last, text: streamedText || statusText[event.status || ''] || last.text }
-          }
-          return { messages }
-        })
+        updateReply(streamedText || statusText[event.status || ''] || get().messages.find(message => message.id === requestId)?.text || '思考中…')
       })
       try {
         const player = usePlayerStore.getState()
@@ -227,7 +226,7 @@ export const useAgentStore = create<AgentState>()(
           pictureMode: player.pictureMode,
           subtitleVisible: player.subtitleVisible,
           isFullscreen: player.isFullscreen
-        }, requestId, { mode: get().agentMode })
+        }, requestId, { mode: options.mode || get().agentMode, documentTokens: options.documentTokens })
         let reply = result.text
         if ((result.toolResults || []).length > 0) {
           const descs: string[] = []
@@ -277,29 +276,14 @@ export const useAgentStore = create<AgentState>()(
           }
         }
         if (result.cancelled && !reply) reply = '已取消生成。'
-        set((state) => {
-          const messages = [...state.messages]
-          const last = messages[messages.length - 1]
-          if (last?.role === 'agent') messages[messages.length - 1] = { ...last, text: reply }
-          return { messages, thinking: false, activeRequestId: null }
-        })
+        updateReply(reply, true)
       } catch (e) {
-        set((state) => {
-          const messages = [...state.messages]
-          const last = messages[messages.length - 1]
-          const errorText = `[错误] ${e instanceof Error ? e.message : String(e)}`
-          if (last?.role === 'agent') messages[messages.length - 1] = { ...last, text: errorText }
-          return { thinking: false, activeRequestId: null, messages }
-        })
+        updateReply(`[错误] ${e instanceof Error ? e.message : String(e)}`, true)
       } finally {
         offStream()
       }
     } else {
-      set((state) => {
-        const messages = [...state.messages]
-        messages[messages.length - 1] = { role: 'agent', text: 'Web 端尚未连接 AI 服务；本地播放与文件预览仍可正常使用。' }
-        return { thinking: false, activeRequestId: null, messages }
-      })
+      updateReply('Web 端尚未连接 AI 服务；本地播放与文件预览仍可正常使用。', true)
     }
   }
     }),

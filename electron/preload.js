@@ -36,7 +36,9 @@ contextBridge.exposeInMainWorld('aiPlayer', {
   platform: 'desktop',
   isElectron: true,
   version: ipcRenderer.sendSync('app:version'),
+  buildInfo: ipcRenderer.sendSync('app:build-info'),
   ai: {
+    interpretIntent: (input) => ipcRenderer.invoke('ai:interpret-intent', input),
     chat: (messages, context, requestId, agentOptions) => ipcRenderer.invoke('ai:chat', messages, context, requestId, agentOptions),
     cancel: (requestId) => ipcRenderer.invoke('ai:cancel', requestId),
     onStream: (cb) => {
@@ -126,6 +128,7 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     }
   },
   models: {
+    verify: (input) => ipcRenderer.invoke('models:verify-capabilities', input),
     providers: () => ipcRenderer.invoke('models:providers'),
     config: (role = 'chat') => ipcRenderer.invoke('models:config', role),
     routingStatus: () => ipcRenderer.invoke('models:routing-status'),
@@ -183,6 +186,8 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     }
   },
   inlinePlayback: {
+    cacheStatus: () => ipcRenderer.invoke('inline-playback:cache-status'),
+    clearUnusedCache: () => ipcRenderer.invoke('inline-playback:clear-unused'),
     prepare: (input) => ipcRenderer.invoke('inline-playback:prepare', input),
     cancel: (requestId) => ipcRenderer.invoke('inline-playback:cancel', requestId),
     onProgress: (cb) => {
@@ -329,6 +334,7 @@ contextBridge.exposeInMainWorld('aiPlayer', {
     save: (dataUrl, suggestedName) => ipcRenderer.invoke('screenshot:save', dataUrl, suggestedName)
   },
   subtitle: {
+    openLocal: () => ipcRenderer.invoke('subtitle:open-local'),
     search: (name) => ipcRenderer.invoke('subtitle:search', name),
     download: (fileId) => ipcRenderer.invoke('subtitle:download', fileId)
   },
