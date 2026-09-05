@@ -63,12 +63,17 @@ test('stopAll kills every active child for quit cleanup', () => {
 
 test('quit cleanup covers analysis, downloads, mirror, live subtitle and whisper', () => {
   const main = source('electron/main.js')
-  const quit = main.slice(main.indexOf("app.on('before-quit'"), main.indexOf("app.on('before-quit'") + 1200)
+  const start = main.indexOf("app.on('before-quit'")
+  assert.ok(start >= 0)
+  // Match the whole top-level handler, not a byte window that drops later cleanup.
+  const quit = main.slice(start).split(/\r?\n\}\)/, 1)[0]
   assert.match(quit, /activeAnalysisRequests\.values\(\)\) controller\.abort/)
   assert.match(quit, /activeMediaDownloads\.values\(\)\) controller\.abort/)
   assert.match(quit, /transcriptionService\.stopAll\(\)/)
   assert.match(quit, /mirrorReceiver\?\.stop\(\)/)
   assert.match(quit, /mirrorSender\?\.close\(\)/)
+  assert.match(quit, /\[localAiDownload, whisperDownload, whisperSmallDownload, ytdlpDownload, translateDownload, rapidocrDownload\]/)
+  assert.match(quit, /downloader\?\.cancel\(\)/)
 })
 
 test('quit cleanup state is declared in the same outer scope as before-quit', () => {
