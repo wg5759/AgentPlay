@@ -10,8 +10,11 @@ const {
   downloadRemoteMedia,
   extractUrl,
   isDownloadIntent,
-  isMediaUrl
+  isMediaUrl,
+  isPeerTubeUrl,
+  isVideoSiteUrl
 } = require('../electron/media-download-service')
+const peertubeFixture = require('./fixtures/peertube-no-login.json')
 
 const dnsPublic = async () => ({ address: '93.184.216.34' })
 
@@ -72,7 +75,25 @@ test('X and Facebook links enter the site-video pipeline', () => {
   }
 })
 
-const { isVideoSiteUrl } = require('../electron/media-download-service')
+test('public PeerTube watch URLs enter the site-video pipeline without login', () => {
+  assert.ok(peertubeFixture.url, 'fixture url must be documented')
+  assert.equal(peertubeFixture.loginRequired, false)
+  assert.match(String(peertubeFixture.permission || ''), /Public|no-login|Framasoft|regression/i)
+  const urls = [peertubeFixture.url, peertubeFixture.legacyUrl, peertubeFixture.embedUrl]
+  for (const url of urls) {
+    assert.equal(isPeerTubeUrl(url), true, url + ' is a PeerTube watch/embed URL')
+    assert.equal(isVideoSiteUrl(url), true, url + ' routes to yt-dlp site video')
+    assert.equal(isMediaUrl(url), false, url + ' is not a direct media file link')
+    assert.equal(isDownloadIntent('看看这个 ' + url), true, url + ' share text triggers download intent')
+    assert.equal(isDownloadIntent(url), true, 'bare ' + url + ' is download intent')
+  }
+  assert.equal(isPeerTubeUrl('https://peertube.example.org/w/AbCdEfGhIjKlMnOpQrStUv'), true)
+  assert.equal(isPeerTubeUrl('https://example.com/w/short'), false, 'short ids under 10 chars are not PeerTube')
+  assert.equal(isPeerTubeUrl('https://example.com/blog/w/not-a-video-page-here'), false)
+  assert.equal(isPeerTubeUrl('https://framatube.org/a/framasoft/video-channels'), false)
+})
+
+
 
 test('download writes file atomically with progress and follows redirects', async () => {
   const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dl-'))

@@ -121,7 +121,8 @@ try {
 
   const x = await submitLink('https://x.com/chrsaravia/status/2032301380015157715')
   const facebook = await submitLink('https://www.facebook.com/watch/?v=1234567890')
-  process.stdout.write(`${JSON.stringify({ version: expectedVersion, x, facebook })}\n`)
+  const peertube = await submitLink('https://framatube.org/w/ff2EVqgHrQX5WJyJJc7Uax')
+  process.stdout.write(`${JSON.stringify({ version: expectedVersion, x, facebook, peertube })}\n`)
   websocket.send(JSON.stringify({ id: ++nextId, method: 'Browser.close', params: {} }))
   await delay(1000)
 } finally {

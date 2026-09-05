@@ -25,17 +25,34 @@ function extractUrl(text) {
 }
 
 // 常见视频站域名：消息里带这些链接就视为视频下载/拉片意图（含分享口令格式）
-const VIDEO_SITE_HOSTS = ['bilibili.com', 'b23.tv', 'douyin.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'ixigua.com', 'kuaishou.com', 'xiaohongshu.com', 'v.qq.com', 'iqiyi.com', 'mgtv.com', 'youku.com', 'sohu.com', 'x.com', 'twitter.com', 'facebook.com', 'fb.watch']
+const VIDEO_SITE_HOSTS = ['bilibili.com', 'b23.tv', 'douyin.com', 'youtube.com', 'youtu.be', 'tiktok.com', 'ixigua.com', 'kuaishou.com', 'xiaohongshu.com', 'v.qq.com', 'iqiyi.com', 'mgtv.com', 'youku.com', 'sohu.com', 'x.com', 'twitter.com', 'facebook.com', 'fb.watch', 'framatube.org', 'video.blender.org', 'peertube.tv', 'peertube2.cpy.re', 'tilvids.com', 'media.fsfe.org']
+
+// PeerTube is federated: detect standard watch/embed paths on any host, plus known instances above.
+// Short form /w/<id> and classic /videos/watch|embed/<uuid> (see PeerTube web routes).
+const PEERTUBE_SHORT_PATH = /^\/w\/[A-Za-z0-9_-]{10,48}$/
+const PEERTUBE_LEGACY_PATH = /^\/videos\/(?:watch|embed)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isPeerTubeUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false
+    const pathname = parsed.pathname.replace(/\/+$/, '') || '/'
+    if (PEERTUBE_SHORT_PATH.test(pathname) || PEERTUBE_LEGACY_PATH.test(pathname)) return true
+    return false
+  } catch {
+    return false
+  }
+}
 
 function isVideoSiteUrl(value) {
   try {
+    if (isPeerTubeUrl(value)) return true
     const host = new URL(String(value || '').trim()).hostname.toLowerCase()
     return VIDEO_SITE_HOSTS.some((site) => host === site || host.endsWith('.' + site))
   } catch {
     return false
   }
 }
-
 function isDownloadIntent(text) {
   const url = extractUrl(text)
   if (!url) return false
@@ -174,6 +191,7 @@ module.exports = {
   extractUrl,
   isDownloadIntent,
   isMediaUrl,
+  isPeerTubeUrl,
   isVideoSiteUrl,
   assertUrlAllowed
 }
