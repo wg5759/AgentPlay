@@ -65,7 +65,20 @@ test('global keyboard shortcuts accept Window or Document targets without crashi
 test('mpv reapplies complete-fit policy after every file load and full-screen remeasures its container', () => {
   const player = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'PlayerView.tsx'), 'utf8')
   const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8')
-  assert.match(player, /player\.loadFile\(videoSrc\)\.then[\s\S]{0,240}player\.setPictureMode\(usePlayerStore\.getState\(\)\.pictureMode\)/)
+  for (const newline of ['\n', '\r\n']) {
+    const source = player.replace(/\r?\n/g, newline)
+    const callback = source.match(/player\.loadFile\(videoSrc\)\.then\((\(loaded\) => \{[\s\S]*?\})\)\r?\n\s*player\.showContainer/)
+    assert.ok(callback, 'load callback is wired before showing the container')
+    const modes = []
+    const applyLoaded = require('node:vm').runInNewContext(`(${callback[1]})`, {
+      player: { setPictureMode: value => modes.push(value), setVolume: () => {}, seek: () => {}, play: () => {} },
+      usePlayerStore: { getState: () => ({ pictureMode: 'fit' }) }, volume: 50, currentTime: 0, isPlaying: false,
+    })
+    applyLoaded(false)
+    assert.deepEqual(modes, [])
+    applyLoaded(true)
+    assert.deepEqual(modes, ['fit'])
+  }
   assert.match(main, /enter-full-screen[\s\S]{0,180}mpv:remeasure/)
   assert.match(main, /leave-full-screen[\s\S]{0,180}mpv:remeasure/)
 })
