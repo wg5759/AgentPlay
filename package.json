@@ -65,7 +65,7 @@
     "typescript": "^5.6.3",
     "vite": "6.4.3",
     "vite-plugin-pwa": "^0.21.1",
-    "wait-on": "^8.0.1"
+    "wait-on": "^9.1.0"
   },
   "build": {
     "appId": "com.aiplayer.app",
