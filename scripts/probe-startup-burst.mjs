@@ -31,7 +31,12 @@ let main, page
 const launched = [], receipt = { evidence, profile, exe, mode: 'real external processes during cached verified first-run ZIP extraction; no in-app-open substitute', startedAt: new Date().toISOString() }
 try {
   main = await connectCdp(inspector, 'node')
-  await main.evaluate(`(() => { const e=process.getBuiltinModule('module').createRequire(process.execPath)('electron');globalThis.__burst={events:[],maxLagMs:0};globalThis.__burstApp=e.app;e.app.prependListener('second-instance',(_,argv)=>__burst.events.push({at:Date.now(),argv}));let last=Date.now();globalThis.__burstTimer=setInterval(()=>{const now=Date.now();__burst.maxLagMs=Math.max(__burst.maxLagMs,now-last-50);last=now},50);return true })()`)
+  await main.command('Runtime.runIfWaitingForDebugger')
+  // At native startup there may not yet be a Promise/microtask checkpoint. Install
+  // synchronous observation without awaiting an artificial Promise around eval.
+  const attached = await main.command('Runtime.evaluate', { expression: `(() => { const e=process.getBuiltinModule('module').createRequire(process.execPath)('electron');globalThis.__burst={events:[],maxLagMs:0};globalThis.__burstApp=e.app;e.app.prependListener('second-instance',(_,argv)=>__burst.events.push({at:Date.now(),argv}));let last=Date.now();globalThis.__burstTimer=setInterval(()=>{const now=Date.now();__burst.maxLagMs=Math.max(__burst.maxLagMs,now-last-50);last=now},50);return true })()`, returnByValue: true }, 15000)
+  if (attached.exceptionDetails) throw Error(attached.exceptionDetails.exception?.description || attached.exceptionDetails.text)
+  receipt.inspectorAttachedAt=Date.now()
   const extracting = path.join(profile, 'yt-dlp', site.assets[1].files[0].path + '.tmp')
   await until(() => fs.existsSync(extracting), 'real FFmpeg worker extraction', 90000)
   receipt.extractionObservedAt = Date.now()

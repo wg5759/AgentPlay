@@ -5,7 +5,9 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, safeStorage, session, desktop
 // Forward additional files before loading the heavy application module graph.
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
-  app.quit()
+  // The native single-instance call has already forwarded argv. This process
+  // owns no windows/services/tasks; do not wait for graceful app shutdown.
+  app.exit(0)
   return
 }
 const path = require('path')
