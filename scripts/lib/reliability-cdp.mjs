@@ -10,7 +10,7 @@ export async function connectCdp(port, type) {
   socket.onclose = () => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(Error('CDP closed')) } pending.clear() }
   await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
   const command = (method, params = {}, timeout = 90000) => new Promise((resolve, reject) => { const id = ++sequence; const timer = setTimeout(() => { pending.delete(id); reject(Error(`CDP timeout: ${method}`)) }, timeout); pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params })) })
-  const evaluate = async expression => { const result = await command('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true, userGesture: true }); if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text); return result.result?.value }
+  const evaluate = async expression => { const result = await command('Runtime.evaluate', { expression: `globalThis.__reliabilityPending = Promise.resolve(eval(${JSON.stringify(expression)}))`, awaitPromise: true, returnByValue: true, userGesture: true }); if (result.exceptionDetails) throw Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text); return result.result?.value }
   return { command, evaluate, close: () => socket.close() }
 }
 export async function until(check, label, timeout = 60000) { const end = Date.now() + timeout; let last; while (Date.now() < end) { try { last = await check(); if (last) return last } catch {} await delay(100) } throw Error(`Not ready: ${label}`) }

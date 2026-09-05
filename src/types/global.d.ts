@@ -1,4 +1,5 @@
 declare module '*.mjs' {
+  export function positionVttContent(content: string, position: 'high' | 'middle' | 'low'): string
   export function findSubtitleOrdinal(content: string, start: number, end: number): number | null
   export function directIntent(text: unknown): { kind: string; route?: string; source?: string } | null
   export interface WorkspaceJourneyTask {

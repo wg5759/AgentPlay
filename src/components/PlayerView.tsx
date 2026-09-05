@@ -4,7 +4,7 @@ import PlaybackTools from './PlaybackTools'
 import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 import { PLAYER_CHROME_HIDE_DELAY_MS, isRealMouseActivity, shouldAutoHideControls } from '../player-ui-policy.mjs'
-import { subtitleCueSettings, subtitleLinePercent, findSubtitleOrdinal } from '../subtitle-display-policy.mjs'
+import { subtitleCueSettings, subtitleLinePercent, findSubtitleOrdinal, positionVttContent } from '../subtitle-display-policy.mjs'
 import { classifyMediaPlaybackError, sameMediaFileStat } from '../player-media-error-policy.mjs'
 import mediaFormats from '../../electron/media-formats.json'
 
@@ -42,8 +42,7 @@ function getFileType(name?: string | null): string {
 }
 
 function applyVttPosition(content: string, position: 'high' | 'middle' | 'low') {
-  const settings = subtitleCueSettings(position)
-  return content.replace(/^(\d{2}:\d{2}:\d{2}\.\d{3}\s+-->\s+\d{2}:\d{2}:\d{2}\.\d{3})(?:\s+.*)?$/gm, `$1 ${settings}`)
+  return positionVttContent(content, position)
 }
 
 function subtitleToVtt(content: string, ext: string, position: 'high' | 'middle' | 'low') {

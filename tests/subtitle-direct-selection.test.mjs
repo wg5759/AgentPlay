@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import ts from 'typescript'
+import * as policy from '../src/subtitle-display-policy.mjs'
 import { findSubtitleOrdinal } from '../src/subtitle-display-policy.mjs'
 test('direct subtitle edits bind to source order rather than time-sorted TextTrack order', () => {
   const content = '10\n00:00:03,000 --> 00:00:08,000\n后半段\n\n20\n00:00:00,000 --> 00:00:03,000\n前半段\n'
@@ -10,4 +14,18 @@ test('direct subtitle edits bind to source order rather than time-sorted TextTra
 test('ambiguous overlapping subtitle rows are not silently edited', () => {
   const cue = '00:00:00.000 --> 00:00:02.000\n同一句'
   assert.equal(findSubtitleOrdinal(`WEBVTT\n\n${cue}\n\n${cue}`, 0, 2), null)
+})
+
+test('the player positioning conversion preserves subtitle text on following lines', () => {
+  const source = fs.readFileSync(path.resolve('src/components/PlayerView.tsx'), 'utf8')
+  const start = source.indexOf('function applyVttPosition(')
+  const end = source.indexOf('function subtitleToVtt(', start)
+  const code = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const apply = new Function('subtitleCueSettings', 'positionVttContent', `${code}; return applyVttPosition`)(policy.subtitleCueSettings, policy.positionVttContent)
+  for (const newline of ['\n', '\r\n']) {
+    const vtt = ['WEBVTT', '', '1', '00:00:00.000 --> 00:00:03.000', '已校对的字幕', '', '2', '00:00:03.000 --> 00:00:08.000', 'Second caption'].join(newline)
+    const result = apply(vtt, 'low')
+    assert.ok(result.includes('已校对的字幕'))
+    assert.ok(result.includes('Second caption'))
+  }
 })

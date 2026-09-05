@@ -36,3 +36,8 @@ export function findSubtitleOrdinal(content, start, end) {
   const candidates = timelines.map((match, index) => ({ index: index + 1, start: seconds(match[1]), end: seconds(match[2]) })).filter(item => Math.abs(item.start - start) < 0.002 && Math.abs(item.end - end) < 0.002)
   return candidates.length === 1 ? candidates[0].index : null
 }
+export function positionVttContent(content, position) {
+  const settings = subtitleCueSettings(position)
+  // Horizontal whitespace only: \\s would consume the newline and cue text.
+  return String(content).replace(/^((?:\d{2,}:)?\d{2}:\d{2}\.\d{3}[ \t]+-->[ \t]+(?:\d{2,}:)?\d{2}:\d{2}\.\d{3})(?:[ \t]+[^\r\n]*)?(\r?)$/gm, (_line, timing, carriage) => `${timing} ${settings}${carriage}`)
+}

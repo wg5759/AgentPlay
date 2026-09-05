@@ -35,7 +35,7 @@ async function launch(currentProfile, firstSource, env = {}) {
   const port = await freePort(), inspector = await freePort()
   child = spawn(exe, [`--user-data-dir=${currentProfile}`, `--remote-debugging-port=${port}`, `--inspect=${inspector}`, '--disable-backgrounding-occluded-windows', '--disable-features=CalculateNativeWinOcclusion', firstSource], { cwd: path.dirname(exe), windowsHide: true, stdio: 'ignore', env: { ...process.env, ...env } })
   main = await connectCdp(inspector, 'node')
-  await main.evaluate(`globalThis.__reliabilityElectron = process.mainModule.require('electron'); true`)
+  await main.evaluate(`globalThis.__reliabilityElectron = process.getBuiltinModule('module').createRequire(process.execPath)('electron'); true`)
   const actualProfile = await main.evaluate("globalThis.__reliabilityElectron.app.getPath('userData')")
   assert.equal(fs.realpathSync(actualProfile).toLowerCase(), fs.realpathSync(currentProfile).toLowerCase(), 'isolated profile')
   await main.evaluate(`(() => { const e=globalThis.__reliabilityElectron; const open=e.dialog.showOpenDialog.bind(e.dialog); e.dialog.showOpenDialog=(...args)=>args.at(-1)?.title==='选择字幕文件'?Promise.resolve({canceled:false,filePaths:[${JSON.stringify(subtitle)}]}):open(...args); ${cloud ? "const box=e.dialog.showMessageBox.bind(e.dialog);e.dialog.showMessageBox=(...args)=>args.at(-1)?.title==='云端发送确认'?Promise.resolve({response:1}):box(...args);" : ''} return true })()`)
@@ -54,6 +54,7 @@ async function click(label) {
 async function seek(seconds) { await page.evaluate(`(() => {const v=document.querySelector('[data-ai-player-video]');v.currentTime=${seconds};v.dispatchEvent(new Event('timeupdate'));return true})()`); await delay(250) }
 
 try {
+  receipt.stage = 'launch'
   await launch(profile, source, native ? { MPV_EMBED: '1' } : { MPV_EMBED: '0' })
   if (native) {
     await delay(5000)
@@ -63,6 +64,7 @@ try {
   } else {
     await until(() => page.evaluate("document.querySelector('[data-ai-player-video]')?.readyState>=2"), 'decoded video')
     receipt.buildInfo = await page.evaluate('window.aiPlayer.buildInfo')
+    receipt.stage = 'subtitle-ui'
     assert.match(receipt.buildInfo.sourceSha256, /^[a-f0-9]{64}$/)
     await page.evaluate("const v=document.querySelector('[data-ai-player-video]');v.muted=true;v.loop=true;const button=[...document.querySelectorAll('.player-video-controls button[title]')].find(b=>b.title.startsWith('暂停'));button?.click();true")
     if (await page.evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='不用了')")) await click('不用了')
@@ -82,6 +84,7 @@ try {
     await click('撤销本次字幕修改'); await seek(1)
     assert.equal(await page.evaluate("document.querySelector('track')?.track?.activeCues?.[0]?.text"), '第一条字幕')
     receipt.checks.subtitleEditAndUndo = true
+    receipt.stage = 'clip-ui'
     await seek(1); await click('起点 —s'); await seek(3); await click('终点 —s'); await click('剪出选段')
     await until(() => page.evaluate("(()=>{const v=document.querySelector('[data-ai-player-video]');return v?.readyState>=2&&Math.abs(v.duration-2)<0.3})()"), 'trimmed playback', 120000)
     receipt.checks.directTrimSeconds = await page.evaluate("document.querySelector('[data-ai-player-video]').duration")
@@ -93,6 +96,7 @@ try {
     await until(() => page.evaluate('window.aiPlayer.windowControls.isFullscreen().then(value=>!value)'), 'restored window')
     assert.ok(await page.evaluate('outerWidth<screen.availWidth&&outerHeight<screen.availHeight'))
     receipt.checks.idempotentFullscreenAndWindowMargins = true
+    receipt.stage = 'model-verification'
     const image = await page.command('Page.captureScreenshot', { format: 'png' })
     fs.writeFileSync(path.join(evidence, 'workspace.png'), Buffer.from(image.data, 'base64'))
     if (cloud) {
@@ -127,5 +131,5 @@ try {
     receipt.checks.damagedTaskStorageKeepsPlayback = true
     receipt.verdict = 'passed'
   }
-} catch (error) { receipt.verdict = 'failed'; receipt.failure = error.message; process.exitCode = 1 }
-finally { await close(); fs.writeFileSync(path.join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2)); console.log(JSON.stringify({ evidence, verdict: receipt.verdict, failure: receipt.failure, checks: receipt.checks, model: receipt.model })) }
+} catch (error) { receipt.verdict = 'failed'; receipt.failure = error.message; process.exitCode = 1; try { const image = await page?.command('Page.captureScreenshot', { format: 'png' }, 5000); if (image) fs.writeFileSync(path.join(evidence, 'failure.png'), Buffer.from(image.data, 'base64')) } catch {} }
+finally { await close(); fs.writeFileSync(path.join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2)); console.log(JSON.stringify({ evidence, stage: receipt.stage, verdict: receipt.verdict, failure: receipt.failure, checks: receipt.checks, model: receipt.model })) }
