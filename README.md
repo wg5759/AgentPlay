@@ -12,8 +12,8 @@
 <p align="center">
   <a href="https://wg5759.github.io/AgentPlay/">Website</a> ·
   <a href="docs/assets/promo/agentplay-demo.mp4">45-second demo</a> ·
-  <a href="https://github.com/wg5759/AgentPlay/releases">Downloads</a> ·
-  <a href="docs/QUICK_START.md">Quick start</a> ·
+  <a href="https://github.com/wg5759/AgentPlay/releases/tag/v0.9.1-preview.3">Downloads</a> ·
+  <a href="docs/QUICK_START.en.md">Quick start</a> ·
   <a href="README.zh-CN.md">中文</a>
 </p>
 
@@ -81,7 +81,7 @@ Use only the [official Releases page](https://github.com/wg5759/AgentPlay/releas
 4. Choose **Smart**, **Local only**, or **Quality first** only when an AI task needs a model. Playback, local downloads, and deterministic document conversions do not require a cloud model.
 5. Open **Tasks & results** to inspect progress, evidence, failures, and recoverable work.
 
-See the [quick-start guide](docs/QUICK_START.md) for model setup, logs, downloads, and troubleshooting.
+See the [quick-start guide](docs/QUICK_START.en.md) for model setup, logs, downloads, and troubleshooting.
 
 ## Verified scope
 
