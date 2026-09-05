@@ -27,6 +27,7 @@ function validateManifest(manifest) {
   }
   const checkFile = (file) => {
     if (!SAFE_PATH.test(String(file.path || '')) || file.path.includes('..')) throw new Error('本地 AI 组件包路径无效')
+    if (file.archivePath !== undefined && (!SAFE_PATH.test(String(file.archivePath)) || file.archivePath.includes('..') || file.archivePath.startsWith('/'))) throw new Error('本地 AI 压缩包路径无效')
     if (!Number.isFinite(file.size) || file.size <= 0) throw new Error('本地 AI 组件包大小无效')
     if (!/^[a-f0-9]{64}$/.test(String(file.sha256 || ''))) throw new Error('本地 AI 组件包哈希无效')
   }
@@ -308,7 +309,7 @@ class LocalAiDownloadService {
     const archive = await JSZip.loadAsync(fs.readFileSync(zipPath))
     for (const file of asset.files) {
       if (controller.signal.aborted) throw new Error('已取消下载')
-      const entry = archive.file(file.path)
+      const entry = archive.file(file.archivePath || file.path)
       if (!entry) throw new Error(`组件包缺少文件: ${file.path}`)
       const buffer = await entry.async('nodebuffer')
       const target = this.targetFor(file.path)
@@ -323,7 +324,6 @@ class LocalAiDownloadService {
 
   writeInstallManifest() {
     const modelAsset = this.manifest.assets.find((asset) => asset.role === 'model')
-    if (!modelAsset) throw new Error('本地 AI 组件包缺少模型资产')
     const artifacts = []
     for (const asset of this.manifest.assets) {
       if (asset.kind === 'zip') {
@@ -339,7 +339,7 @@ class LocalAiDownloadService {
       generatedAt: new Date().toISOString(),
       product: this.manifest.product || 'AgentPlay 本地 AI 组件',
       source: { tag: this.manifest.tag, channel: 'in-app-download' },
-      model: { expectedSha256: modelAsset.sha256 },
+      ...(modelAsset ? { model: { expectedSha256: modelAsset.sha256 } } : {}),
       artifacts
     }
     const target = path.join(this.installRoot, 'bundled-ai-manifest.json')

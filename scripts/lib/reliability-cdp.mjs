@@ -3,7 +3,7 @@ export const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 export async function freePort() { const server = net.createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port }
 export async function connectCdp(port, type) {
   let target
-  for (let i = 0; i < 240; i++) { try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1000) })).json()).find(item => item.type === type) } catch {}; if (target?.webSocketDebuggerUrl) break; await delay(250) }
+  for (let i = 0; i < 240; i++) { try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1000) })).json()).find(item => item.type === type && (type !== 'page' || item.url.startsWith('file:'))) } catch {}; if (target?.webSocketDebuggerUrl) break; await delay(250) }
   if (!target?.webSocketDebuggerUrl) throw Error(`CDP unavailable: ${type}`)
   const socket = new WebSocket(target.webSocketDebuggerUrl); const pending = new Map(); let sequence = 0
   socket.onmessage = event => { const value = JSON.parse(event.data), item = pending.get(value.id); if (!item) return; pending.delete(value.id); clearTimeout(item.timer); value.error ? item.reject(Error(value.error.message)) : item.resolve(value.result) }

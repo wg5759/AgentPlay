@@ -48,6 +48,7 @@ for (const name of Object.keys(archive.files)) {
   const buffer = await archive.file(name).async('nodebuffer')
   engineFiles.push({
     path: `engine/${name.replace(/^Release\//, '')}`,
+    archivePath: name,
     size: buffer.length,
     sha256: crypto.createHash('sha256').update(buffer).digest('hex')
   })

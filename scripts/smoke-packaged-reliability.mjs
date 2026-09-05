@@ -9,7 +9,9 @@ import { connectCdp, delay, freePort, until } from './lib/reliability-cdp.mjs'
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3)
 const exe = argument('exe')
 assert.ok(exe && fs.existsSync(exe), 'provide --exe=actual candidate or installed executable')
-const cloud = process.argv.includes('--cloud'), native = process.argv.includes('--native')
+const cloudAgnes = process.argv.includes('--cloud-agnes')
+const cloud = process.argv.includes('--cloud') || cloudAgnes, native = process.argv.includes('--native')
+if (cloudAgnes) assert.ok(process.env.AGNES_API_KEY, 'existing Agnes credential required; never print it')
 const root = path.resolve('release')
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'agentplay-reliability-'))
 const evidence = fs.mkdtempSync(path.join(root, 'reliability-acceptance-'))
@@ -29,6 +31,7 @@ const configFile = path.join(realProfile, 'model-config.json')
 const originalConfigHash = cloud && fs.existsSync(configFile) ? sha(configFile) : null
 if (cloud) { assert.ok(originalConfigHash, 'existing saved model connection required'); fs.copyFileSync(configFile, path.join(profile, 'model-config.json')) }
 const receipt = { executable: exe, sourceFixture: 'generated-h264-aac-8s', syntheticConsent: cloud, nativePilot: native, checks: {}, profile }
+receipt.machine = { platform: process.platform, arch: process.arch, cpu: os.cpus()[0]?.model, logicalCpus: os.cpus().length, memoryGiB: Math.round(os.totalmem()/1024**3) }
 let child, page, main
 
 async function launch(currentProfile, firstSource, env = {}) {
@@ -36,8 +39,10 @@ async function launch(currentProfile, firstSource, env = {}) {
   child = spawn(exe, [`--user-data-dir=${currentProfile}`, `--remote-debugging-port=${port}`, `--inspect=${inspector}`, '--disable-backgrounding-occluded-windows', '--disable-features=CalculateNativeWinOcclusion', firstSource], { cwd: path.dirname(exe), windowsHide: true, stdio: 'ignore', env: { ...process.env, ...env } })
   main = await connectCdp(inspector, 'node')
   await main.evaluate(`globalThis.__reliabilityElectron = process.getBuiltinModule('module').createRequire(process.execPath)('electron'); true`)
+  await main.evaluate('globalThis.__reliabilityElectron.app.whenReady().then(() => true)')
   const actualProfile = await main.evaluate("globalThis.__reliabilityElectron.app.getPath('userData')")
   assert.equal(fs.realpathSync(actualProfile).toLowerCase(), fs.realpathSync(currentProfile).toLowerCase(), 'isolated profile')
+  if (cloudAgnes) await main.evaluate(`(() => {const e=globalThis.__reliabilityElectron;const r=process.getBuiltinModule('module').createRequire(process.execPath);const {ModelConfigStore}=r(e.app.getAppPath()+'/electron/model-config-store.js');new ModelConfigStore(e.app.getPath('userData'),e.safeStorage).save({role:'chat',providerId:'agnes',model:'agnes-2.5-flash',apiKey:process.env.AGNES_API_KEY});return true})()`)
   await main.evaluate(`(() => { const e=globalThis.__reliabilityElectron; const open=e.dialog.showOpenDialog.bind(e.dialog); e.dialog.showOpenDialog=(...args)=>args.at(-1)?.title==='选择字幕文件'?Promise.resolve({canceled:false,filePaths:[${JSON.stringify(subtitle)}]}):open(...args); ${cloud ? "const box=e.dialog.showMessageBox.bind(e.dialog);e.dialog.showMessageBox=(...args)=>args.at(-1)?.title==='云端发送确认'?Promise.resolve({response:1}):box(...args);" : ''} return true })()`)
   page = await connectCdp(port, 'page')
   await page.command('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -55,6 +60,7 @@ async function seek(seconds) { await page.evaluate(`(() => {const v=document.que
 
 try {
   receipt.stage = 'launch'
+  const launchedAt = Date.now()
   await launch(profile, source, native ? { MPV_EMBED: '1' } : { MPV_EMBED: '0' })
   if (native) {
     await delay(5000)
@@ -62,7 +68,8 @@ try {
     receipt.checks.windows = await main.evaluate('globalThis.__reliabilityElectron.BrowserWindow.getAllWindows().map(w=>({id:w.id,parent:w.getParentWindow()?.id,bounds:w.getBounds(),visible:w.isVisible()}))')
     receipt.verdict = 'geometry-only-pilot'; receipt.visualPlaybackVerified = false
   } else {
-    await until(() => page.evaluate("document.querySelector('[data-ai-player-video]')?.readyState>=2"), 'decoded video')
+    await until(() => page.evaluate("(()=>{const v=document.querySelector('[data-ai-player-video]');return v?.readyState>=2&&v.getVideoPlaybackQuality().totalVideoFrames>0})()"), 'decoded video')
+    receipt.observedFirstFrameMs = Date.now()-launchedAt
     receipt.buildInfo = await page.evaluate('window.aiPlayer.buildInfo')
     receipt.stage = 'subtitle-ui'
     assert.match(receipt.buildInfo.sourceSha256, /^[a-f0-9]{64}$/)
@@ -106,7 +113,7 @@ try {
       assert.equal(receipt.capabilities.success, true, 'real text capability')
       const cases = [ ['不要录屏，我只是想知道这个功能怎么用','ask'], ['查重会不会删除我的原文件？','ask'], ['先别压缩，文件太大是不是码率高？','ask'], ['如果以后想剪辑视频，应该怎么做？','ask'], ['我只想了解字幕翻译的费用，请别开始翻译。','ask'], ['请将当前视频的字幕翻译成英文','execute'], ['帮我把这个视频里的重复句子删掉','execute'], ['请把这份材料改写成一段简短介绍','execute'] ]
       receipt.intentCases = []
-      for (let index=0; index<cases.length; index++) { const [text, expected]=cases[index]; const started=Date.now(); const result=await page.evaluate(`window.aiPlayer.ai.interpretIntent({text:${JSON.stringify(text)},requestId:'intent-acceptance-${index}',materials:[{name:'demo.mp4',type:'active-video'},{name:'facts.txt',type:'.txt'}],history:[]})`); receipt.intentCases.push({text,expected,actual:result.kind,latencyMs:Date.now()-started}); assert.equal(result.kind,expected,text) }
+      for (let index=0; index<cases.length; index++) { const [text, expected]=cases[index]; const started=Date.now(); const result=await page.evaluate(`window.aiPlayer.ai.interpretIntent({text:${JSON.stringify(text)},requestId:'intent-acceptance-${index}',materials:[{name:'demo.mp4',type:'active-video'},{name:'facts.txt',type:'.txt'}],history:[]})`); receipt.intentCases.push({text,expected,actual:result.kind,error:result.error,latencyMs:Date.now()-started}); assert.equal(result.kind,expected,`${text}: ${result.error || ''}`) }
       const attached = await page.evaluate(`window.aiPlayer.chat.attachPaths([${JSON.stringify(facts)}])`)
       assert.ok(attached.documents?.[0]?.token)
       const answer = await page.evaluate(`window.aiPlayer.ai.chat([{role:'user',content:'这份合成文档的租赁到期日是什么？'}],null,'chat-document-proof',{mode:'ask',documentTokens:[${JSON.stringify(attached.documents[0].token)}]})`)
