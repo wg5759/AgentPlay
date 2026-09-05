@@ -2,9 +2,8 @@ const crypto = require('crypto')
 const fs = require('fs')
 const net = require('net')
 const path = require('path')
-const { once } = require('events')
-const { Readable } = require('stream')
-const JSZip = require('jszip')
+const { transferWithRecovery } = require('./component-transfer')
+const { extractInWorker } = require('./component-archive')
 const { isLoopbackHostname, isProtectedAddress } = require('./network-policy')
 
 const DEFAULT_ALLOWED_HOSTS = ['github.com', '.githubusercontent.com']
@@ -54,17 +53,24 @@ function roleForPath(filePath) {
 }
 
 class LocalAiDownloadService {
-  constructor({ installRoot, manifest, fetchImpl, dnsLookup, allowedHosts, localOnly, logger } = {}) {
+  constructor({ installRoot, manifest, fetchImpl, dnsLookup, allowedHosts, localOnly, logger, maxAttempts = 3, headersTimeoutMs = 20000, idleTimeoutMs = 20000, totalTimeoutMs = 1800000, retryDelayMs = 500 } = {}) {
     if (!installRoot) throw new Error('缺少本地 AI 安装目录')
     validateManifest(manifest)
     this.installRoot = path.resolve(installRoot)
     this.manifest = manifest
+    this.receiptPath = path.join(this.installRoot, '.install-receipts', crypto.createHash('sha256').update(manifest.tag).digest('hex').slice(0, 24) + '.json')
     this.fetchImpl = fetchImpl || (typeof fetch === 'function' ? fetch.bind(globalThis) : null)
     if (!this.fetchImpl) throw new Error('当前环境缺少 fetch，无法下载本地 AI 组件')
     this.allowedHosts = allowedHosts || DEFAULT_ALLOWED_HOSTS
     this.localOnly = Boolean(localOnly)
     this.logger = logger || console
     this.active = null
+    this.maxAttempts = Math.max(1, Math.min(3, Math.floor(maxAttempts)))
+    this.headersTimeoutMs = Math.max(10, headersTimeoutMs)
+    this.idleTimeoutMs = Math.max(10, idleTimeoutMs)
+    this.totalTimeoutMs = Math.max(10, totalTimeoutMs)
+    this.retryDelayMs = Math.max(0, retryDelayMs)
+    this.maxRetryDelayMs = 5000
   }
 
   packInfo() {
@@ -104,7 +110,19 @@ class LocalAiDownloadService {
         missing += 1
       }
     }
-    return { installed: missing === 0, presentBytes, totalBytes: files.reduce((sum, file) => sum + file.size, 0) }
+    let verified = false
+    try {
+      const receipt = JSON.parse(fs.readFileSync(this.receiptPath, 'utf8'))
+      verified = receipt.source?.tag === this.manifest.tag && JSON.stringify(receipt.verifiedFiles) === JSON.stringify(this.verifiedFileSnapshot())
+    } catch { /* Legacy/missing receipts must be verified once, not treated as ready. */ }
+    return { installed: missing === 0 && verified, presentBytes, totalBytes: files.reduce((sum, file) => sum + file.size, 0) }
+  }
+
+  verifiedFileSnapshot() {
+    return this.finalFiles().map(file => {
+      const s = fs.statSync(this.targetFor(file.path))
+      return { path: file.path, sha256: file.sha256, size: s.size, mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs, ino: s.ino, dev: s.dev }
+    })
   }
 
   status() {
@@ -199,62 +217,18 @@ class LocalAiDownloadService {
   async fileIntact(file) {
     try {
       const stat = fs.statSync(this.targetFor(file.path))
-      return stat.isFile() && stat.size === file.size
+      return stat.isFile() && stat.size === file.size && await sha256File(this.targetFor(file.path)) === file.sha256
     } catch {
       return false
     }
   }
 
   async streamToFile(asset, filePath, controller, progress, emit) {
-    let resumeFrom = 0
-    try {
-      const stat = fs.statSync(filePath)
-      if (stat.isFile()) resumeFrom = stat.size
-    } catch { /* 没有可续传的临时文件 */ }
-    if (resumeFrom > asset.size) {
-      fs.rmSync(filePath, { force: true })
-      resumeFrom = 0
-    }
-    const headers = resumeFrom > 0 ? { Range: `bytes=${resumeFrom}-` } : {}
-    const response = await this.fetchAllowed(asset.url, { headers, signal: controller.signal })
-    let received = resumeFrom
-    let append = false
-    if (resumeFrom > 0 && response.status === 206) {
-      append = true
-      progress.receivedBytes += resumeFrom
-      emit(true)
-    } else if (response.status === 416 && resumeFrom === asset.size) {
-      try { await response.body?.cancel() } catch { /* 忽略响应体释放异常 */ }
-      progress.receivedBytes += resumeFrom
-      emit(true)
-      return
-    } else if (response.status === 200) {
-      received = 0
-    } else {
-      throw new Error(`组件包下载失败 (${response.status}): ${asset.label || asset.id}`)
-    }
-    const stream = fs.createWriteStream(filePath, { flags: append ? 'a' : 'w' })
-    try {
-      const body = Readable.fromWeb(response.body)
-      for await (const chunk of body) {
-        if (controller.signal.aborted) throw new Error('已取消下载')
-        if (!stream.write(chunk)) await once(stream, 'drain')
-        received += chunk.length
-        progress.receivedBytes += chunk.length
-        if (received > asset.size) throw new Error('组件包大小超出清单，已中止')
-        emit()
-      }
-    } catch (error) {
-      if (controller.signal.aborted) throw new Error('已取消下载')
-      throw error
-    } finally {
-      stream.end()
-      await once(stream, 'close').catch(() => {})
-    }
-    if (received !== asset.size) throw new Error(`组件包下载不完整: ${asset.label || asset.id}`)
+    return transferWithRecovery(this, asset, filePath, controller, progress, emit)
   }
 
   async downloadFileAsset(asset, controller, progress, emit) {
+    if (controller.signal.aborted) throw new Error('已取消下载')
     const target = this.targetFor(asset.path)
     if (await this.fileIntact(asset)) {
       progress.receivedBytes += asset.size
@@ -264,10 +238,12 @@ class LocalAiDownloadService {
     fs.mkdirSync(path.dirname(target), { recursive: true })
     const part = `${target}.part`
     await this.streamToFile(asset, part, controller, progress, emit)
+    if (controller.signal.aborted) throw new Error('已取消下载')
     progress.stage = 'verify'
     progress.currentFile = asset.label || asset.id
     emit(true)
     await this.assertFileIntegrity(part, asset, true)
+    if (controller.signal.aborted) throw new Error('已取消下载')
     fs.renameSync(part, target)
     progress.stage = 'download'
   }
@@ -306,20 +282,8 @@ class LocalAiDownloadService {
     progress.stage = 'extract'
     progress.currentFile = asset.label || asset.id
     emit(true)
-    const archive = await JSZip.loadAsync(fs.readFileSync(zipPath))
-    for (const file of asset.files) {
-      if (controller.signal.aborted) throw new Error('已取消下载')
-      const entry = archive.file(file.archivePath || file.path)
-      if (!entry) throw new Error(`组件包缺少文件: ${file.path}`)
-      const buffer = await entry.async('nodebuffer')
-      const target = this.targetFor(file.path)
-      fs.mkdirSync(path.dirname(target), { recursive: true })
-      const temp = `${target}.tmp`
-      fs.writeFileSync(temp, buffer)
-      await this.assertFileIntegrity(temp, file, true)
-      fs.renameSync(temp, target)
-    }
-    fs.rmSync(zipPath, { force: true })
+    await extractInWorker(zipPath, this.installRoot, asset, controller.signal, file => { progress.currentFile = file; emit() })
+    try { fs.unlinkSync(zipPath) } catch (error) { this.logger.warn?.('组件已验证，下载缓存稍后清理', error.code) }
   }
 
   writeInstallManifest() {
@@ -340,6 +304,7 @@ class LocalAiDownloadService {
       product: this.manifest.product || 'AgentPlay 本地 AI 组件',
       source: { tag: this.manifest.tag, channel: 'in-app-download' },
       ...(modelAsset ? { model: { expectedSha256: modelAsset.sha256 } } : {}),
+      verifiedFiles: this.verifiedFileSnapshot(),
       artifacts
     }
     const target = path.join(this.installRoot, 'bundled-ai-manifest.json')
@@ -347,6 +312,9 @@ class LocalAiDownloadService {
     const temp = `${target}.tmp`
     fs.writeFileSync(temp, `${JSON.stringify(document, null, 2)}\n`)
     fs.renameSync(temp, target)
+    fs.mkdirSync(path.dirname(this.receiptPath), { recursive: true })
+    fs.writeFileSync(this.receiptPath + '.tmp', JSON.stringify(document))
+    fs.renameSync(this.receiptPath + '.tmp', this.receiptPath)
   }
 
   async runDownload(controller, progress, onProgress) {
@@ -358,6 +326,7 @@ class LocalAiDownloadService {
       try { onProgress?.({ ...progress }) } catch { /* 监听器异常不影响下载 */ }
     }
     for (const asset of this.manifest.assets) {
+      if (controller.signal.aborted) throw new Error('已取消下载')
       progress.stage = 'download'
       progress.currentFile = asset.label || asset.id
       progress.fileIndex += 1
@@ -368,6 +337,11 @@ class LocalAiDownloadService {
     progress.stage = 'verify'
     progress.currentFile = '写入安装清单'
     emit(true)
+    for (const file of this.finalFiles()) {
+      if (controller.signal.aborted) throw new Error('已取消下载')
+      if (!await this.fileIntact(file)) throw new Error(`组件最终校验失败: ${file.path}`)
+    }
+    if (controller.signal.aborted) throw new Error('已取消下载')
     this.writeInstallManifest()
     progress.stage = 'done'
     progress.receivedBytes = progress.totalBytes
