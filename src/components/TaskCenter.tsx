@@ -66,11 +66,13 @@ export default function TaskCenter({ onClose, onRetry, onContinue, onCancel, can
           {task.evidence.slice(0, 4).map((item) => <li key={item.id} title={item.value}><i className={item.verified ? 'is-verified' : ''} /><strong>{item.label}</strong><span>{item.value}</span></li>)}
         </ul>}
         {task.quality && (
-          <div className={`task-center-quality is-${task.quality.level}`}>
-            <div><strong>质量评分 {task.quality.score}</strong><span>交付线 {task.quality.threshold}</span></div>
+          <details className={`task-center-quality is-${task.quality.level}`} onClick={event => event.stopPropagation()}>
+            <summary>{task.quality.passed ? '技术检查通过' : '技术检查未通过'} · 查看检查明细</summary>
+            <p>内容准确性和创作效果请结合结果核对，技术分不代表满意度。</p>
+            <div><strong>检查评分 {task.quality.score}</strong><span>交付线 {task.quality.threshold}</span></div>
             <i aria-label={`质量评分 ${task.quality.score}，交付线 ${task.quality.threshold}`}><b style={{ width: `${task.quality.score}%` }} /></i>
             {task.quality.reasons.length > 0 && <ul>{task.quality.reasons.slice(0, 3).map((item) => <li key={item.code}>{item.message}</li>)}</ul>}
-          </div>
+          </details>
         )}
         {task.repairHistory.length > 0 && (
           <div className="task-center-repairs">

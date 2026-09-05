@@ -270,6 +270,65 @@ class VideoFrameService {
     }
   }
 
+  // Batch small, nearby proof samples into one decode. Tagged PTS identifies
+  // each returned frame; absent samples are left to the scalar fallback.
+  async readProofFrames(requests, { signal } = {}) {
+    const frames = new Map()
+    if (!this.ffmpegPath || !fs.existsSync(this.ffmpegPath)) return frames
+    const pending = [...new Map(requests.filter(Boolean).map(item => [item.key, item])).values()]
+    const families = new Map()
+    for (const item of pending) {
+      const family = `${item.file}\n${item.fitWidth || 0}x${item.fitHeight || 0}`
+      if (!families.has(family)) families.set(family, [])
+      families.get(family).push({ ...item, from: item.kind === 'last' ? Math.max(0, item.at - 0.7) : item.at, to: item.at + (item.kind === 'last' ? 1.05 : 0.3) })
+    }
+    for (const items of families.values()) {
+      items.sort((a, b) => a.from - b.from)
+      const groups = []
+      for (const item of items) {
+        let group = groups.at(-1)
+        if (!group || group.items.length >= 16 || Math.max(group.to, item.to) - group.from > 3) { group = { from: item.from, to: item.to, items: [] }; groups.push(group) }
+        group.items.push(item); group.to = Math.max(group.to, item.to)
+      }
+      for (const group of groups) {
+        if (signal?.aborted) throw new Error('已取消')
+        const names = group.items.map((_, index) => `[p${index}]`)
+        const graph = [`[0:v:0]split=${names.length}${names.join('')}`]
+        for (let index = 0; index < group.items.length; index++) {
+          const item = group.items[index]
+          const scale = this.frameProofScaleFilter(item)
+          const from = Math.max(0, item.from - group.from).toFixed(3)
+          const filter = item.kind === 'last'
+            ? `trim=start=${from},select='lte(t,${(item.at - group.from - 0.033).toFixed(3)})',${scale},reverse,select='eq(n,0)'`
+            : `trim=start=${from},select='eq(n,0)',${scale}`
+          graph.push(`[p${index}]${filter},setpts=${index + 1}/TB[r${index}]`)
+        }
+        graph.push(`${group.items.map((_, index) => `[r${index}]`).join('')}interleave=nb_inputs=${names.length}:duration=longest,showinfo[proof]`)
+        const args = ['-hide_banner', '-nostdin', '-nostats', '-v', 'info', '-ss', group.from.toFixed(3), '-t', (group.to - group.from).toFixed(3), '-i', group.items[0].file, '-an', '-sn', '-dn', '-filter_complex', graph.join(';'), '-map', '[proof]', '-vsync', '0', '-pix_fmt', 'gray', '-f', 'rawvideo', '-']
+        const result = await new Promise((resolve, reject) => {
+          const child = this.spawnImpl(this.ffmpegPath, args, { windowsHide: true, shell: false })
+          const chunks = []; let bytes = 0; let stderr = ''; let failed = false
+          const abort = () => { failed = true; try { child.kill() } catch {} }
+          const timer = setTimeout(abort, Math.min(15000, this.frameReadTimeoutMs))
+          signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort()
+          child.stdout?.on('data', chunk => { bytes += chunk.length; if (bytes > group.items.length * 1024) abort(); else chunks.push(chunk) })
+          child.stderr?.on('data', chunk => { stderr = (stderr + chunk.toString('utf8')).slice(-262144) })
+          child.once('error', () => { failed = true })
+          child.once('close', code => {
+            clearTimeout(timer); signal?.removeEventListener('abort', abort)
+            if (signal?.aborted) reject(new Error('已取消'))
+            else resolve(!failed && code === 0 ? { buffer: Buffer.concat(chunks), stderr } : null)
+          })
+        })
+        if (!result) continue
+        const ids = [...result.stderr.matchAll(/\bn:\s*\d+\s+pts:\s*-?\d+\s+pts_time:\s*([\d.eE+-]+)/g)].map(match => Number(match[1]))
+        if (result.buffer.length !== ids.length * 1024 || new Set(ids).size !== ids.length || ids.some(id => !Number.isInteger(id) || id < 1 || id > group.items.length)) continue
+        ids.forEach((id, index) => frames.set(group.items[id - 1].key, result.buffer.subarray(index * 1024, (index + 1) * 1024)))
+      }
+    }
+    return frames
+  }
+
   // 读取一个有界的单声道 PCM 窗口，用于声音结果核验；s16le 是样本值，不代表 LUFS 或 true peak。
   async readPcmWindow(sourcePath, seconds, { durationSeconds = 0.3, sampleRateHz = 16000, signal } = {}) {
     const start = Math.max(0, Number(seconds) || 0)

@@ -8,8 +8,16 @@ export default function usePersistentTaskRuntime(requestIdRef: CurrentRef<string
   useEffect(() => {
     const surfacedOutputs = new Set<string>()
     const syncRuntimeTask = (runtimeTask: PersistentRuntimeTask, fromEvent = false) => {
-      if (!runtimeTask?.workspaceTaskId || runtimeTask.id === requestIdRef.current) return
+      if (!runtimeTask?.id || runtimeTask.id === requestIdRef.current) return
+      runtimeTask = { ...runtimeTask, workspaceTaskId: runtimeTask.workspaceTaskId || runtimeTask.id }
       const store = useAgentStore.getState()
+      if (runtimeTask.type === 'system.recovery') {
+        const id = runtimeTask.workspaceTaskId
+        const update = { phase: 'failed' as const, error: runtimeTask.error, failure: runtimeTask.failure || null }
+        if (store.tasks.some(task => task.id === id)) store.updateTask(id, update)
+        else store.startTask({ id, kind: 'utility', label: '后台任务需要恢复', ...update })
+        return
+      }
       const existing = store.tasks.find((item) => item.id === runtimeTask.workspaceTaskId)
       const isDocument = runtimeTask.type === 'document.run'
       const isAnalysis = runtimeTask.type === 'analysis.run'
@@ -46,7 +54,7 @@ export default function usePersistentTaskRuntime(requestIdRef: CurrentRef<string
       const firstSourcePath = Array.isArray(runtimeTask.spec?.sources) ? String(runtimeTask.spec.sources[0]?.path || '') : ''
       const allOutputPaths = Array.isArray(runtimeTask.result?.outputs)
         ? runtimeTask.result.outputs.map(String)
-        : runtimeTask.result?.outputPath ? [String(runtimeTask.result.outputPath)] : []
+        : runtimeTask.result?.outputPath ? [String(runtimeTask.result.outputPath)] : runtimeTask.result?.srtPath ? [String(runtimeTask.result.srtPath)] : []
       const outputPaths = isDedup ? [] : allOutputPaths
       const deliveryReceipt = runtimeTask.result?.deliveryReceipt as {
         sources?: Array<{ name?: string; sha256?: string; bytes?: number }>

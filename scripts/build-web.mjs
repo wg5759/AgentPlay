@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { Worker } from 'node:worker_threads'
+import { execFileSync } from 'node:child_process'
 
 const distDir = path.resolve('dist')
 const pollMs = 500
@@ -60,6 +61,15 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function writeBuildInfo() {
+  const source = crypto.createHash('sha256')
+  const walk = root => { for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) { const file = path.join(root, entry.name); if (entry.isDirectory()) walk(file); else if (entry.isFile()) { source.update(file.replaceAll('\\', '/')); source.update(fs.readFileSync(file)) } } }
+  walk('src'); walk('electron'); source.update(fs.readFileSync('package.json'))
+  let commit = 'source-export'
+  try { commit = execFileSync('git', ['rev-parse', '--short=10', 'HEAD'], { encoding: 'utf8', windowsHide: true }).trim() } catch { /* exported source has no .git */ }
+  fs.writeFileSync(path.join(distDir, 'build-info.json'), JSON.stringify({ version: JSON.parse(fs.readFileSync('package.json', 'utf8')).version, commit, sourceSha256: source.digest('hex') }))
+}
+
 const worker = new Worker(new URL('./vite-build-worker.mjs', import.meta.url))
 let workerResult = null
 worker.on('message', (message) => { workerResult = message })
@@ -71,6 +81,7 @@ try {
     if (workerResult?.success === false) throw new Error(workerResult.error || 'Vite 构建线程失败')
     if (currentBuildArtifactsReady()) {
       await worker.terminate()
+      writeBuildInfo()
       console.log('verified current Vite/PWA artifacts; exiting')
       process.exit(0)
     }
@@ -80,6 +91,7 @@ try {
         await worker.terminate()
         writeFallbackServiceWorker()
         if (!currentBuildArtifactsReady()) throw new Error('回退 Service Worker 生成后产物仍不完整')
+        writeBuildInfo()
         console.log('verified current Vite artifacts and generated a deterministic fallback service worker; exiting')
         process.exit(0)
       }
@@ -89,6 +101,7 @@ try {
     if (workerResult?.success && coreArtifactsReady()) {
       writeFallbackServiceWorker()
       if (!currentBuildArtifactsReady()) throw new Error('Vite 返回成功但 PWA 产物不完整')
+      writeBuildInfo()
       console.log('verified current Vite artifacts and completed the missing service worker; exiting')
       process.exit(0)
     }

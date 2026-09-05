@@ -101,7 +101,7 @@ Read [PRIVACY.md](PRIVACY.md), [SECURITY.md](SECURITY.md), and [SUPPORT.md](SUPP
 
 ## Development
 
-Requirements: Node.js 20+ and pnpm.
+Requirements: Node.js 24 LTS and pnpm 10.32.1.
 
 ```powershell
 pnpm install

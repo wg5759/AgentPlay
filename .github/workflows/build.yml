@@ -19,14 +19,16 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
       - uses: pnpm/action-setup@v6
         with:
           version: 10.32.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      - run: pnpm audit --prod --registry=https://registry.npmjs.org
-      - run: pnpm audit --registry=https://registry.npmjs.org
+      - name: Audit production dependencies (network failures are not vulnerability findings)
+        run: node scripts/audit-dependencies.mjs --prod
+      - name: Audit all dependencies
+        run: node scripts/audit-dependencies.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -44,14 +46,16 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
       - uses: pnpm/action-setup@v6
         with:
           version: 10.32.1
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-      - run: pnpm audit --prod --registry=https://registry.npmjs.org
-      - run: pnpm audit --registry=https://registry.npmjs.org
+      - name: Audit production dependencies (network failures are not vulnerability findings)
+        run: node scripts/audit-dependencies.mjs --prod
+      - name: Audit all dependencies
+        run: node scripts/audit-dependencies.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

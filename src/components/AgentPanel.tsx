@@ -11,6 +11,7 @@ import { buildSuggestedActions } from './agent-panel/suggestions'
 import type { AgentAttachment, AgentHistoryRecord, DocumentCapabilities, PendingTaskKind } from './agent-panel/types'
 import { createIntentRouter } from './agent-panel/intentRouter'
 import { createTaskCommandDispatcher } from './agent-panel/taskCommandDispatcher'
+import { cancelCurrentTask } from './agent-panel/cancelCurrentTask'
 import useDocumentAnalysisTasks from './agent-panel/useDocumentAnalysisTasks'
 import useLinkMediaTasks from './agent-panel/useLinkMediaTasks'
 import useMediaCreativeTasks from './agent-panel/useMediaCreativeTasks'
@@ -315,8 +316,17 @@ export default function AgentPanel() {
   const routeTextSend = createIntentRouter({
     inputText, attachments, agentMode, addMessage, setInputText, setLinkChoice,
     isVideoGenerationIntent, runBatchTask, runBatchEditTask, runCrossMaterialQuestion, runVideoGenTask, runAiAssetBundleTask, runPersonalEditSkillCommand, runEditHistoryTask, runTrimTask, runAudioMixAttachmentTask,
-    runCompressTask, runDedupTask, runDocumentTask: runDocTask, runOutcomeWorkflow, setAnalysisFormat,
-    runAnalysisTask, send
+    runCompressTask, runDedupTask, runDocumentTask: (instruction) => runDocTask(false, instruction, false, true), runOutcomeWorkflow, setAnalysisFormat,
+    runAnalysisTask, send, recentMessages: messages,
+    cancelCurrent: async () => {
+      const current = useAgentStore.getState().task
+      if ((!current.id || ['completed', 'failed', 'cancelled'].includes(current.phase)) && !docBusyRef.current && await runTrimTask('取消')) return
+      const result = await cancelCurrentTask(); addMessage('agent', result.message)
+      if (result.cancelled && result.id === executionTaskIdRef.current) { setNeedsApproval(false); setCloudApproved(false); docBusyRef.current = false; setDocBusy(false); releaseCancelableRequest(docRequestIdRef.current) }
+      setInputText('')
+    },
+    currentContext: () => JSON.stringify([useAgentStore.getState().inputText, useAgentStore.getState().attachments.map(file => file.token), usePlayerStore.getState().videoSrc]),
+    onInterpreting: (busy, requestId) => { if (busy || useAgentStore.getState().activeRequestId === requestId) useAgentStore.setState({ thinking: busy, activeRequestId: busy ? requestId : '' }) }
   })
   routeTextSendRef.current = routeTextSend
 

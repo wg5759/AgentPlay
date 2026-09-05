@@ -93,6 +93,39 @@ class InlinePlaybackService {
     this.run = run
     this.maxBytes = maxBytes
     this.busy = false
+    this.activeCachePath = ''
+  }
+
+  cacheStatus() {
+    if (!fs.existsSync(this.cacheDir)) return { bytes: 0, limitBytes: this.maxBytes, reclaimableBytes: 0, items: [] }
+    const items = []
+    for (const name of fs.readdirSync(this.cacheDir)) {
+      if (!/^[a-f0-9]{64}\.(mp4|m4a)$/.test(name)) continue
+      const file = path.join(this.cacheDir, name)
+      const stat = fs.lstatSync(file)
+      if (!stat.isFile() || stat.isSymbolicLink()) continue
+      const key = name.split('.')[0]
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(this.cacheDir, `${key}.json`), 'utf8'))
+        const kind = name.endsWith('.mp4') ? 'video' : 'audio'
+        const expected = crypto.createHash('sha256').update(`${VERSION}|${kind}|${manifest.sourceSha256}`).digest('hex')
+        if (manifest.version !== VERSION || expected !== key || !/^[a-f0-9]{64}$/.test(manifest.outputSha256)) continue
+      } catch { continue }
+      items.push({ name, bytes: stat.size, inUse: file === this.activeCachePath })
+    }
+    return { bytes: items.reduce((sum, item) => sum + item.bytes, 0), limitBytes: this.maxBytes, reclaimableBytes: items.filter(item => !item.inUse).reduce((sum, item) => sum + item.bytes, 0), items }
+  }
+
+  clearUnusedCache() {
+    if (this.busy) throw new Error('正在准备播放，请完成或取消后再清理缓存')
+    if (fs.existsSync(this.cacheDir) && fs.lstatSync(this.cacheDir).isSymbolicLink()) throw new Error('缓存目录是链接，无法安全清理')
+    let removedBytes = 0
+    for (const item of this.cacheStatus().items.filter(item => !item.inUse)) {
+      fs.unlinkSync(path.join(this.cacheDir, item.name))
+      fs.unlinkSync(path.join(this.cacheDir, `${item.name.split('.')[0]}.json`))
+      removedBytes += item.bytes
+    }
+    return { removedBytes, ...this.cacheStatus() }
   }
 
   async probe(source, signal) {
@@ -126,6 +159,7 @@ class InlinePlaybackService {
       if (allowDirect && canPlayDirect(input, path.extname(resolved).toLowerCase())) {
         cancelled(signal)
         if (!sameStat(initial, fs.statSync(resolved))) throw new Error('源文件仍在变化，请完成写入后重试')
+        this.activeCachePath = ''
         return { path: resolved, kind, cached: false, duration: input.duration, backend: 'html5' }
       }
       const sourceSha256 = await digest(resolved, signal)
@@ -139,6 +173,7 @@ class InlinePlaybackService {
         if (await digest(output, signal) === manifest.outputSha256) {
           if (!sameStat(initial, fs.statSync(resolved))) throw new Error('源文件仍在变化，请完成写入后重试')
           onProgress({ phase: 'ready', percent: 100 })
+          this.activeCachePath = output
           return { path: output, cached: true, kind, sourceSha256, duration: input.duration, backend: manifest.backend }
         }
       }
@@ -183,6 +218,7 @@ class InlinePlaybackService {
       fs.renameSync(manifestTemp, manifestPath)
       manifestTemp = null
       onProgress({ phase: 'ready', percent: 100 })
+      this.activeCachePath = output
       return { path: output, cached: false, kind, sourceSha256, duration: input.duration, backend }
     } finally {
       if (temporary) fs.rmSync(temporary, { force: true })

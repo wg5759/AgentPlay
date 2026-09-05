@@ -75,6 +75,11 @@ function AppInner() {
   }
 
   const closeRightPane = () => {
+    // Exit before PlayerView unmounts and loses its native event listener.
+    if (usePlayerStore.getState().theater || usePlayerStore.getState().isFullscreen) {
+      if (window.aiPlayer?.windowControls) void window.aiPlayer.windowControls.setFullscreen(false)
+      else if (document.fullscreenElement) void document.exitFullscreen()
+    }
     void window.aiPlayer?.player?.stop()
     usePlayerStore.getState().clearMedia()
   }

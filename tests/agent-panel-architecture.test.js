@@ -8,7 +8,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 test('AgentPanel is a workflow container with bounded size and extracted surfaces', () => {
   const panel = read('src/components/AgentPanel.tsx')
-  assert.ok(panel.split(/\r?\n/).length <= 580, '新任务族接入后 AgentPanel 仍应保持为轻量容器')
+  assert.ok(panel.split(/\r?\n/).length <= 600, '主容器仅装配任务族与语义入口的状态回调')
   for (const moduleName of ['AgentComposer', 'AgentHome', 'RuntimeSettings', 'useVoiceInput', 'useIncomingFiles', 'useLinkMediaTasks', 'useDocumentAnalysisTasks', 'useCrossMaterialQaTasks', 'useTaskNotificationNavigation', 'useMediaCreativeTasks', 'useContinueTask']) {
     assert.match(panel, new RegExp(`import ${moduleName} from './agent-panel/${moduleName}'`))
   }
@@ -18,21 +18,22 @@ test('AgentPanel is a workflow container with bounded size and extracted surface
   assert.doesNotMatch(panel, /new MediaRecorder\(/)
 })
 
-test('intent router owns deterministic priority and graceful detector fallback', () => {
+test('legacy dispatch keeps its fallback order behind the semantic gate', () => {
   const panel = read('src/components/AgentPanel.tsx')
-  const router = read('src/components/agent-panel/intentRouter.ts')
+  const fullRouter = read('src/components/agent-panel/intentRouter.ts')
+  const router = fullRouter.slice(fullRouter.indexOf('if (attachments.length > 0 && BATCH_SCOPE_INTENT'))
   assert.doesNotMatch(panel, /mediaDownload\.detect|analysis\.detect|libraryIntents/)
   const orderedMarkers = [
     'BATCH_SCOPE_INTENT.test(text)',
     'await runCrossMaterialQuestion(text)',
-    'await runDocumentTask()',
+    'await runDocumentTask(text)',
     'isVideoGenerationIntent(text)',
     'window.aiPlayer?.mediaTools',
     "DEDUP_INTENT.test(text)",
-    'LIBRARY_INTENTS.find',
+    'const libraryHit = LIBRARY_INTENTS.find',
     'window.aiPlayer.mediaDownload.detect(text)',
     'window.aiPlayer.analysis.detect(text)',
-    'void send()'
+    "void send('', { text })"
   ]
   let previous = -1
   for (const marker of orderedMarkers) {

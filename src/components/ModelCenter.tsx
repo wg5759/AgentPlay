@@ -315,6 +315,9 @@ export default function ModelCenter({ onClose, intent }: Props) {
     const preferred = matchedProvider?.models?.[0]
     const defaultModel = preferred && match.models.includes(preferred) ? preferred : match.models[0]
     const modelToUse = oneKeyModelPick[match.providerId] || defaultModel
+    setStatus('正在验证文本、看图和工具能力（少量测试请求）…')
+    const verified = role === 'chat' ? await window.aiPlayer?.models?.verify({ role, providerId: match.providerId, model: modelToUse, baseUrl: matchedProvider?.baseUrl || '', apiKey: oneKey.trim() }) : { success: true, message: '专用连接已保存，请使用测试连接验证。' }
+    if (!verified?.success) throw new Error(verified?.message || '模型验证未完成，连接尚未保存')
     const saved = await window.aiPlayer?.models?.save({
       role,
       providerId: match.providerId,
@@ -345,7 +348,7 @@ export default function ModelCenter({ onClose, intent }: Props) {
       setHasApiKey(config.hasApiKey)
     }
     setShowSmartEnhancement(false)
-    setStatus(`✓ 已接入 ${match.providerName}（${modelToUse}），可以开始对话了`)
+    setStatus(`✓ 已接入 ${match.providerName}（${modelToUse}）。${verified.message}`)
   }
 
   const runAutoDetect = async () => {
@@ -612,12 +615,15 @@ export default function ModelCenter({ onClose, intent }: Props) {
     setBusy(true)
     setStatus('正在安全保存…')
     try {
+      setStatus('正在验证文本、看图和工具能力（少量测试请求）…')
+      const verified = role === 'chat' ? await window.aiPlayer?.models?.verify(connectionInput()) : { success: true, message: '专用连接已保存，请使用测试连接验证。' }
+      if (!verified?.success) throw new Error(verified?.message || '模型验证未完成，连接尚未保存')
       const saved = providerId === 'deepseek'
         ? await window.aiPlayer?.models?.save({ role, providerId, model, thinkingMode, baseUrl, apiKey })
         : await window.aiPlayer?.models?.save({ role, providerId, model, baseUrl, apiKey })
       setHasApiKey(Boolean(saved?.hasApiKey))
       setApiKey('')
-      setStatus(`✓ 已保存：${provider?.name || providerId} / ${model}，Key 使用系统加密存储`)
+      setStatus(`✓ 已保存 ${provider?.name || providerId}。${verified.message}；Key 使用系统加密存储`)
       window.dispatchEvent(new CustomEvent('ai-player-models-changed'))
       await refreshRoutingStatus()
     } catch (error) {
@@ -1091,10 +1097,11 @@ export default function ModelCenter({ onClose, intent }: Props) {
           <div className="flex flex-wrap gap-3">
             <button disabled={busy} onClick={refreshModels} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm disabled:opacity-40">读取可用型号</button>
             <button disabled={busy} onClick={testConnection} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm disabled:opacity-40">测试连接</button>
-            <button disabled={busy || !model || (provider?.protocol !== 'cli' && !baseUrl)} onClick={save} className="px-5 py-2 rounded-lg bg-player-accent hover:bg-blue-600 text-sm disabled:opacity-40">保存并启用</button>
+            <button disabled={busy || !model || (provider?.protocol !== 'cli' && !baseUrl)} onClick={save} className="px-5 py-2 rounded-lg bg-player-accent hover:bg-blue-600 text-sm disabled:opacity-40">{role === 'chat' ? '验证并连接' : '保存并启用'}</button>
             {hasApiKey && <button disabled={busy} onClick={clearKey} className="px-3 py-2 text-xs text-red-300 hover:text-red-200">清除已存 Key</button>}
           </div>
 
+          {role === 'chat' && <p className="text-xs text-gray-400">连接时会发送少量文字、纯色图片与工具协议测试，可能产生少量模型用量，不上传你的文件。</p>}
           {planUpgrade && (
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
               <div className="text-sm text-emerald-100">

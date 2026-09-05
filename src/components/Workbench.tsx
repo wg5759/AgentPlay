@@ -38,7 +38,7 @@ export default function Workbench({ rightOpen, sidebar, center, right }: Props) 
           <div className="workspace-topbar-title">
             {!showRail && <span className="workspace-inline-brand"><UiIcon name="agent" size={22} /></span>}
             <div>
-              <span>{rightOpen ? journey.eyebrow : 'AgentPlay'}</span>
+              <span title={JSON.stringify(window.aiPlayer?.buildInfo || {})}>{rightOpen ? journey.eyebrow : `AgentPlay${window.aiPlayer?.buildInfo ? ` · ${window.aiPlayer.buildInfo.version}+${(window.aiPlayer.buildInfo.sourceSha256 || window.aiPlayer.buildInfo.commit || '').slice(0, 8)}` : ''}`}</span>
               <strong>{rightOpen ? mediaName || '当前内容' : '今天 / 新任务'}</strong>
             </div>
           </div>

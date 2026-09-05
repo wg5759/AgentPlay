@@ -284,7 +284,7 @@ export function applyWorkspaceOutputReceipts(task: WorkspaceTask, receipts: Arra
 }
 
 export function restoreWorkspaceTasks(rawTasks: unknown, now = Date.now()): WorkspaceTask[] {
-  return (Array.isArray(rawTasks) ? rawTasks : [])
+  return retainWorkspaceTasks((Array.isArray(rawTasks) ? rawTasks : [])
     .filter((raw): raw is WorkspaceTaskInput => Boolean(raw && typeof raw === 'object'))
     .map((raw) => createWorkspaceTask(raw, now))
     .map((task) => {
@@ -295,8 +295,13 @@ export function restoreWorkspaceTasks(rawTasks: unknown, now = Date.now()): Work
         error: task.error || '应用上次关闭时任务尚未完成，请确认源内容后重试。'
       }, now)
     })
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 80)
+    .sort((a, b) => b.updatedAt - a.updatedAt))
+}
+
+export function retainWorkspaceTasks(tasks: WorkspaceTask[]): WorkspaceTask[] {
+  const held = (task: WorkspaceTask) => ['STATE_RECOVERED_REVIEW_REQUIRED', 'TASK_STORAGE_UNREADABLE'].includes(task.failure?.code || '')
+  const history = new Set(tasks.filter(task => TERMINAL_TASK_PHASES.has(task.phase) && !held(task)).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 80))
+  return tasks.filter(task => !TERMINAL_TASK_PHASES.has(task.phase) || held(task) || history.has(task))
 }
 
 export function progressFromStatus(status: string): number | null {

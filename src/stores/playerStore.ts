@@ -97,7 +97,7 @@ export const usePlayerStore = create<PlayerState>()(
         }))
       },
       // 关闭右栏播放区：停止当前媒体（播放记录里可随时点回）
-      clearMedia: () => set({ mediaName: null, videoSrc: null, isPlaying: false, currentTime: 0 }),
+      clearMedia: () => set({ mediaName: null, videoSrc: null, isPlaying: false, currentTime: 0, duration: 0, theater: false, isFullscreen: false, controlsVisible: true }),
       setControlsVisible: (v) => set({ controlsVisible: v }),
       setPlaybackRate: (v) => set({ playbackRate: Math.max(0.25, Math.min(4, v)) }),
       setPictureMode: (v) => set({ pictureMode: v }),

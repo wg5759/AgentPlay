@@ -53,7 +53,17 @@ function inspectArtifact(filePath) {
     const bytes = stat.size
     if (bytes <= 0) return { exists: true, nonEmpty: false, formatOk: false, bytes, kind: 'file' }
     const ext = path.extname(filePath).toLowerCase()
-    const sample = fs.readFileSync(filePath).subarray(0, Math.min(bytes, 256 * 1024))
+    const header = Buffer.alloc(Math.min(bytes, 256 * 1024))
+    const descriptor = fs.openSync(filePath, 'r')
+    let received = 0
+    try {
+      while (received < header.length) {
+        const count = fs.readSync(descriptor, header, received, header.length - received, received)
+        if (!count) break
+        received += count
+      }
+    } finally { fs.closeSync(descriptor) }
+    const sample = header.subarray(0, received)
     let formatOk = true
     if (OFFICE_ZIP_EXTENSIONS.has(ext)) formatOk = sample.subarray(0, 2).toString('binary') === 'PK'
     else if (ext === '.pdf') formatOk = sample.subarray(0, 4).toString('ascii') === '%PDF'

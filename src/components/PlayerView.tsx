@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import PlayerControls from './PlayerControls'
+import PlaybackTools from './PlaybackTools'
 import { usePlayerStore } from '../stores/playerStore'
 import { useAgentStore } from '../stores/agentStore'
 import { PLAYER_CHROME_HIDE_DELAY_MS, isRealMouseActivity, shouldAutoHideControls } from '../player-ui-policy.mjs'
-import { subtitleCueSettings, subtitleLinePercent } from '../subtitle-display-policy.mjs'
+import { subtitleCueSettings, subtitleLinePercent, findSubtitleOrdinal } from '../subtitle-display-policy.mjs'
 import { classifyMediaPlaybackError, sameMediaFileStat } from '../player-media-error-policy.mjs'
 import mediaFormats from '../../electron/media-formats.json'
 
@@ -77,6 +78,7 @@ export default function PlayerView({ onBack }: Props) {
   const isPlaying = usePlayerStore((s) => s.isPlaying)
   const volume = usePlayerStore((s) => s.volume)
   const currentTime = usePlayerStore((s) => s.currentTime)
+  const duration = usePlayerStore((s) => s.duration)
   const setControlsVisible = usePlayerStore((s) => s.setControlsVisible)
   const controlsVisible = usePlayerStore((s) => s.controlsVisible)
   const setDuration = usePlayerStore((s) => s.setDuration)
@@ -93,6 +95,7 @@ export default function PlayerView({ onBack }: Props) {
   const [officeHtml, setOfficeHtml] = useState<string | null>(null)
   const [officeText, setOfficeText] = useState<string | null>(null)
   const [subtitleUrl, setSubtitleUrl] = useState<string | null>(null)
+  const subtitleSourceRef = useRef('')
   const [subtitleTrackLang, setSubtitleTrackLang] = useState<'zh' | 'en'>('zh')
   const [textContent, setTextContent] = useState<string | null>(null)
   const [dataUrl, setDataUrl] = useState<string | null>(null)
@@ -118,7 +121,7 @@ export default function PlayerView({ onBack }: Props) {
   const [liveSub, setLiveSub] = useState<{ requestId: string; targetLang?: string; cues: Array<{ index: number; start: number; end: number; text: string }> } | null>(null)
   const [liveTranslations, setLiveTranslations] = useState(new Map<number, string>())
   const liveSeekSentRef = useRef(0)
-  const subtitleFileRef = useRef('')
+  const subtitleFileRef = useRef('')
   const [langPrompt, setLangPrompt] = useState<{ lang: string; targetLang: '中文' | '英文' } | null>(null)
   const [detectedLang, setDetectedLang] = useState<'zh' | 'en' | null>(null)
   const langPromptOffRef = useRef(false)
@@ -579,6 +582,16 @@ export default function PlayerView({ onBack }: Props) {
   }
 
   // 影院模式与原生全屏使用同一个明确目标值，避免异步事件把 toggle 状态翻反。
+  const exitPresentation = () => {
+    usePlayerStore.setState({ theater: false, isFullscreen: false, controlsVisible: true })
+    if (isDesktop) void window.aiPlayer?.windowControls?.setFullscreen(false)
+    else if (document.fullscreenElement) void document.exitFullscreen()
+  }
+  const finishPlayback = () => {
+    usePlayerStore.setState({ isPlaying: false })
+    const state = usePlayerStore.getState()
+    if (state.theater || state.isFullscreen) exitPresentation()
+  }
   const toggleTheaterMode = () => {
     const state = usePlayerStore.getState()
     const next = !(state.theater || state.isFullscreen)
@@ -984,20 +997,23 @@ export default function PlayerView({ onBack }: Props) {
   }, [videoSrc])
 
   const applySubtitle = async (subtitlePath: string, ext: string, language?: 'zh' | 'en') => {
-    subtitleFileRef.current = subtitlePath
-    if (language) setSubtitleTrackLang(language)
+    const originalMedia = usePlayerStore.getState().videoSrc
     if (useMpv) {
       const loaded = await window.aiPlayer?.player?.loadSubtitle(subtitlePath)
       if (!loaded) throw new Error('mpv 未能加载字幕')
     } else {
       const result = await window.aiPlayer?.files?.readText(subtitlePath)
       if (!result?.success || result.content === undefined) throw new Error(result?.error || '字幕读取失败')
+      if (usePlayerStore.getState().videoSrc !== originalMedia) throw new Error('当前素材已切换，本次字幕没有应用')
+      subtitleSourceRef.current = result.content
       const nextUrl = URL.createObjectURL(new Blob([subtitleToVtt(result.content, ext, subtitlePosition)], { type: 'text/vtt' }))
       setSubtitleUrl((current) => {
         if (current?.startsWith('blob:')) URL.revokeObjectURL(current)
         return nextUrl
       })
     }
+    subtitleFileRef.current = subtitlePath
+    if (language) setSubtitleTrackLang(language)
     usePlayerStore.setState({ subtitleVisible: true })
     void window.aiPlayer?.player?.setSubtitleVisible(true)
   }
@@ -1045,8 +1061,11 @@ export default function PlayerView({ onBack }: Props) {
     const ext = (file.name.split('.').pop() || '').toLowerCase()
     if (['srt', 'ass', 'ssa', 'vtt'].includes(ext)) {
       if (isDesktop) {
-        const subtitlePath = (file as File & { path: string }).path
-        void applySubtitle(subtitlePath, ext).catch((error) => setSubtitleStatus(String(error)))
+        try {
+          const subtitlePath = window.aiPlayer?.files?.getPathForFile(file)
+          if (!subtitlePath) throw new Error('无法读取字幕文件路径')
+          void window.aiPlayer?.chat?.attachPaths([subtitlePath]).then(() => applySubtitle(subtitlePath, ext)).catch(error => setSubtitleStatus(String(error)))
+        } catch (error) { setSubtitleStatus(String(error)) }
       }
       return
     }
@@ -1179,7 +1198,8 @@ export default function PlayerView({ onBack }: Props) {
           liveTranslate: !!liveSub
         })
       }}
-      onDoubleClick={() => {
+      onDoubleClick={(event) => {
+        if (event.target instanceof Element && event.target.closest('[data-player-chrome], button, input, select, textarea, a')) return
         if (fileType === 'office' || fileType === 'other') return
         toggleTheaterMode()
       }}
@@ -1201,7 +1221,7 @@ export default function PlayerView({ onBack }: Props) {
             handleLoadedMedia(e.currentTarget)
           }}
           onTimeUpdate={(e) => updateTime(e.currentTarget.currentTime)}
-          onEnded={() => usePlayerStore.setState({ isPlaying: false })}
+          onEnded={finishPlayback}
           onError={() => { void handleVideoPlaybackError() }}
           playsInline
         >
@@ -1299,7 +1319,7 @@ export default function PlayerView({ onBack }: Props) {
             onLoadedMetadata={(e) => handleLoadedMedia(e.currentTarget)}
             onError={() => { void handleVideoPlaybackError() }}
             onTimeUpdate={(e) => updateTime(e.currentTarget.currentTime)}
-            onEnded={() => usePlayerStore.setState({ isPlaying: false })}
+            onEnded={finishPlayback}
           />
         </div>
       )}
@@ -1374,6 +1394,12 @@ export default function PlayerView({ onBack }: Props) {
         </div>
       )}
 
+      {(isFullscreen || theater) && (
+        <button type="button" data-exit-fullscreen="true" data-player-chrome="true" onClick={exitPresentation}
+          className="absolute top-4 left-28 z-40 rounded-lg border border-white/20 bg-black/75 px-3 py-1.5 text-sm text-white hover:bg-black/90">
+          退出全屏 · Esc
+        </button>
+      )}
       <button
         onClick={onBack}
         data-player-chrome="true"
@@ -1417,6 +1443,14 @@ export default function PlayerView({ onBack }: Props) {
         </button>
       )}
 
+      {fileType === 'video' && isDesktop && videoSrc && !useMpv && <PlaybackTools key={videoSrc} source={videoSrc} time={currentTime} duration={duration} visible={controlsVisible} loadSubtitle={async source => { await applySubtitle(source, source.split('.').pop() || 'srt') }} getCue={() => {
+        const track = trackRef.current?.track
+        const active = track?.activeCues?.[0] as VTTCue | undefined
+        const file = subtitleFileRef.current
+        if (!active || !track?.cues || !file || !/\.(srt|vtt)$/i.test(file) || bilingualBusy) return null
+        const index = findSubtitleOrdinal(subtitleSourceRef.current, active.startTime, active.endTime)
+        return index ? { index, text: active.text.replace(/<[^>]*>/g, ''), path: file, sourceContent: subtitleSourceRef.current } : null
+      }} />}
       {subtitlePanelOpen && (
         <div className="absolute inset-0 z-40 bg-black/75 flex items-center justify-center" onClick={() => setSubtitlePanelOpen(false)}>
           <div className="w-full max-w-lg max-h-[70vh] overflow-auto bg-player-surface rounded-xl p-5" onClick={(e) => e.stopPropagation()}>

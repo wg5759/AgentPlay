@@ -4,6 +4,9 @@ import type { LinkChoice } from '../../link-choice-policy.mjs'
 import { canDispatchAgentTask } from '../../../electron/agent-runtime-policy.mjs'
 import type { AgentMode } from '../../../electron/agent-runtime-policy.mjs'
 import type { AgentAttachment } from './types'
+import { directIntent } from '../../../electron/intent-policy.mjs'
+
+let interpreting = false
 
 type IntentRouterOptions = {
   inputText: string
@@ -24,11 +27,15 @@ type IntentRouterOptions = {
   runAudioMixAttachmentTask: (text: string) => Promise<boolean>
   runCompressTask: (text: string) => Promise<void>
   runDedupTask: (text: string) => Promise<void>
-  runDocumentTask: () => Promise<void>
+  runDocumentTask: (instruction?: string) => Promise<void>
   runOutcomeWorkflow: () => Promise<void>
   setAnalysisFormat: (format: string) => void
   runAnalysisTask: () => Promise<void>
-  send: (contextNote?: string) => Promise<void>
+  send: (contextNote?: string, options?: { mode?: AgentMode; text?: string; documentTokens?: string[] }) => Promise<void>
+  recentMessages?: Array<{ role: string; text: string }>
+  currentContext?: () => string
+  onInterpreting?: (busy: boolean, requestId: string) => void
+  cancelCurrent?: () => Promise<void>
 }
 
 const BATCH_SCOPE_INTENT = /全部|批量|每个|逐一|一起/
@@ -54,13 +61,47 @@ export function createIntentRouter(options: IntentRouterOptions) {
   return async function routeTextSend(textOverride?: string) {
     const text = (textOverride ?? inputText).trim()
     const { videoSrc } = usePlayerStore.getState()
+    if (!text || interpreting) return
+    if (directIntent(text)?.kind === 'cancel') { await options.cancelCurrent?.(); return }
     if (!canDispatchAgentTask(agentMode)) {
       const context = [
         attachments.length > 0 ? `已附加文件：${attachments.map((file) => file.name).join('、')}` : '',
         videoSrc ? `当前媒体：${videoSrc}` : ''
       ].filter(Boolean).join('\n')
-      await send(context)
+      await send(context, { text })
       return
+    }
+    let intent: { kind: string; route?: string; question?: string; error?: string } | null = directIntent(text)
+    if (!intent) {
+      const requestId = `intent-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      const snapshot = options.currentContext?.()
+      interpreting = true
+      options.onInterpreting?.(true, requestId)
+      try {
+        intent = await window.aiPlayer?.ai?.interpretIntent({ text, requestId, materials: [...attachments.map(file => ({ name: file.name, type: file.ext })), ...(videoSrc ? [{ name: usePlayerStore.getState().mediaName || '当前媒体', type: 'active-video' }] : [])], history: options.recentMessages?.slice(-4) }) || null
+      } catch { intent = null } finally {
+        interpreting = false
+        options.onInterpreting?.(false, requestId)
+      }
+      if (options.currentContext && snapshot !== options.currentContext()) return
+      if (!intent || intent.kind === 'error') {
+        addMessage('agent', intent?.error || '暂时无法确认你的意思。可以用“暂停”或“保留4到20秒”等明确指令，或检查模型连接后重试。')
+        return
+      }
+    }
+    if (intent.kind === 'ask') {
+      if (intent.route === 'attachments' && await runCrossMaterialQuestion(text)) return
+      await send(attachments.length ? `已选素材：${attachments.map(file => `${file.name}（${file.size || 0}字节）`).join('、')}。只回答问题，不转换或修改附件。` : '', { mode: 'ask', text, documentTokens: intent.route === 'attachments' ? attachments.map(file => file.token) : [] })
+      return
+    }
+    if (intent.kind !== 'execute') {
+      addMessage('agent', intent.question || '你希望对当前素材做什么？')
+      return
+    }
+    if (intent.route === 'player') { await send('', { text }); return }
+    if (intent.route === 'library') {
+      const chosen = LIBRARY_INTENTS.find(([pattern]) => pattern.test(text))
+      if (chosen) { addMessage('user', text); setInputText(''); addMessage('agent', chosen[2]); window.dispatchEvent(new CustomEvent('ai-player-action', { detail: chosen[1] })); return }
     }
     if (attachments.length > 0 && BATCH_SCOPE_INTENT.test(text) && BATCH_ACTION_INTENT.test(text) && window.aiPlayer?.mediaBatch) {
       await runBatchTask(text)
@@ -73,8 +114,8 @@ export function createIntentRouter(options: IntentRouterOptions) {
     if (await runPersonalEditSkillCommand(text)) return
     if (await runAiAssetBundleTask(text)) return
     if (attachments.length > 0 && await runAudioMixAttachmentTask(text)) return
-    if (attachments.length > 0) {
-      await runDocumentTask()
+    if (attachments.length > 0 && intent.route !== 'media') {
+      await runDocumentTask(text)
       return
     }
     if (isVideoGenerationIntent(text)) {
@@ -161,6 +202,6 @@ export function createIntentRouter(options: IntentRouterOptions) {
         }
       } catch { /* 视频检测失败时退回普通对话 */ }
     }
-    void send()
+    void send('', { text })
   }
 }

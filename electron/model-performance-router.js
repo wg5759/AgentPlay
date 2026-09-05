@@ -192,6 +192,7 @@ class ModelPerformanceRouter {
       taskKind: String(input.taskKind || 'general'),
       modelKey: modelKey(input.config),
       score: finiteNumber(input.score),
+      profile: String(input.profile || 'content'),
       passed: Boolean(input.passed)
     }
     this.state.quality.push(receipt)
@@ -203,7 +204,7 @@ class ModelPerformanceRouter {
   aggregate(config, taskKind = null) {
     const key = modelKey(config)
     const calls = this.state.observations.filter((item) => item.modelKey === key && (!taskKind || item.taskKind === taskKind))
-    const quality = this.state.quality.filter((item) => item.modelKey === key && (!taskKind || item.taskKind === taskKind))
+    const quality = this.state.quality.filter((item) => item.modelKey === key && item.profile && item.profile !== 'technical' && (!taskKind || item.taskKind === taskKind))
     const successRate = calls.length ? calls.filter((item) => item.success).length / calls.length : null
     const qualityScore = average(quality.map((item) => item.score))
     const latencyMs = average(calls.filter((item) => item.success).map((item) => item.latencyMs))

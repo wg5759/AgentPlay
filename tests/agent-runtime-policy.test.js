@@ -56,7 +56,7 @@ test('renderer, preload and engine wire the selected mode end to end', () => {
   const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8')
   const engine = fs.readFileSync(path.join(root, 'electron', 'llm-service.js'), 'utf8')
   assert.match(store, /agentMode:\s*AgentMode/)
-  assert.match(store, /mode:\s*get\(\)\.agentMode/)
+  assert.match(store, /mode:\s*options\.mode\s*\|\|\s*get\(\)\.agentMode/)
   assert.match(router, /canDispatchAgentTask\(agentMode\)/)
   assert.match(settings, /工作方式/)
   assert.match(preload, /agentOptions/)
