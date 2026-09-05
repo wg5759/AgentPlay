@@ -5,7 +5,9 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, safeStorage, session, desktop
 // Forward additional files before loading the heavy application module graph.
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
-  app.quit()
+  // The native single-instance call has already forwarded argv. This process
+  // owns no windows/services/tasks; do not wait for graceful app shutdown.
+  app.exit(0)
   return
 }
 const path = require('path')
@@ -16,6 +18,7 @@ const ExcelJS = require('exceljs')
 const { execFileSync, spawn } = require('child_process')
 const { MpvService } = require('./mpv-service')
 const { InlinePlaybackService } = require('./inline-playback-service')
+const { ensureFirstRunComponents } = require('./first-run-components')
 const { windowedBounds } = require('./windowed-bounds')
 const { requestScreenGuide, askAboutImage } = require('./screen-guide-service')
 const { shouldEmbedMpv } = require('./playback-policy')
@@ -6026,27 +6029,12 @@ app.whenReady().then(async () => {
     } catch (error) { log.warn('模型清单周更失败（下周再试）', error) }
   })()
 
-  // 首启自动化：新装用户后台静默装好核心组件（离线转写 + 站点视频），不用用户去猜去找
-  void (async () => {
-    try {
-      const markerPath = path.join(app.getPath('userData'), 'first-run-components.json')
-      let marker = null
-      try { marker = JSON.parse(fs.readFileSync(markerPath, 'utf8')) } catch { /* 首次启动 */ }
-      if (marker?.done || (marker?.attempts || 0) >= 3) return
-      log.info('首启自动化：开始后台安装核心组件（离线转写 + 站点视频）')
-      if (!transcriptionService.availability().available) {
-        await whisperDownload.start({}).catch((error) => log.warn('首启转写组件下载失败', error))
-      }
-      if (!siteVideo.availability().available) {
-        await ytdlpDownload.start({}).catch((error) => log.warn('首启站点视频组件下载失败', error))
-      }
-      const done = transcriptionService.availability().available && siteVideo.availability().available
-      fs.writeFileSync(markerPath, JSON.stringify({ done, attempts: (marker?.attempts || 0) + 1, at: new Date().toISOString() }))
-      log.info(done ? '首启自动化：核心组件已就绪' : '首启自动化：组件未全部就绪，下次启动再试')
-    } catch (error) {
-      log.warn('首启自动化失败（下次启动再试）', error)
-    }
-  })()
+  // 首启自动化：按完整组件回执恢复，短暂网络错误不永久关闭自动安装。
+  void ensureFirstRunComponents({
+    markerPath: path.join(app.getPath('userData'), 'first-run-components.json'),
+    components: [{ id: '转写', service: whisperDownload }, { id: '站点视频', service: ytdlpDownload }],
+    log
+  }).catch(error => log.warn('首启自动化暂未完成，下次启动会重试', error))
 
   // 注册完所有执行器和 IPC 后再恢复；长任务在后台继续，渲染进程可通过 list/event 回接状态。
   void persistentTaskRuntime.startRecoverable().catch((error) => log.error('持久任务恢复失败', error))
@@ -6065,6 +6053,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  for (const downloader of [localAiDownload, whisperDownload, whisperSmallDownload, ytdlpDownload, translateDownload, rapidocrDownload]) downloader?.cancel()
   for (const job of inlinePlaybackJobs.values()) job.controller.abort()
   for (const job of inlinePlaybackJobs.values()) job.controller.abort()
   for (const controller of activeAiRequests.values()) controller.abort()

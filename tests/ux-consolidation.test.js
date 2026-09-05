@@ -11,11 +11,16 @@ const sidebar = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 
 const library = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'MediaLibrary.tsx'), 'utf8')
 const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'App.tsx'), 'utf8')
 
-test('first-run automation: silently installs core packs, marker with attempt cap', () => {
+test('first-run automation delegates both core packs to verified recoverable installation', () => {
   assert.match(main, /first-run-components\.json/)
-  assert.match(main, /whisperDownload\.start\(\{\}\)/)
-  assert.match(main, /ytdlpDownload\.start\(\{\}\)/)
-  assert.match(main, /attempts \|\| 0\) >= 3/)
+  assert.match(main, /void ensureFirstRunComponents\(\{/)
+  assert.match(main, /service: whisperDownload/)
+  assert.match(main, /service: ytdlpDownload/)
+  const recovery = fs.readFileSync(path.join(__dirname, '../electron/first-run-components.js'), 'utf8')
+  assert.match(recovery, /item\.service\.start\(\{\}\)/)
+  assert.match(recovery, /item\.service\.status\(\)\.installed/)
+  assert.match(recovery, /nextRetryAt/)
+  assert.doesNotMatch(recovery, /attempts \|\| 0\) >= 3/)
   assert.match(main, /首启自动化/)
 })
 
