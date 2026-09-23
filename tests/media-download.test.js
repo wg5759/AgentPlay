@@ -10,8 +10,11 @@ const {
   downloadRemoteMedia,
   extractUrl,
   isDownloadIntent,
-  isMediaUrl
+  isMediaUrl,
+  isPeerTubeUrl,
+  isVideoSiteUrl
 } = require('../electron/media-download-service')
+const peertubeFixture = require('./fixtures/peertube-no-login.json')
 
 const dnsPublic = async () => ({ address: '93.184.216.34' })
 
@@ -72,10 +75,33 @@ test('X and Facebook links enter the site-video pipeline', () => {
   }
 })
 
-const { isVideoSiteUrl } = require('../electron/media-download-service')
+test('public PeerTube watch URLs enter the site-video pipeline without login', () => {
+  assert.ok(peertubeFixture.url, 'fixture url must be documented')
+  assert.equal(peertubeFixture.loginRequired, false)
+  assert.match(String(peertubeFixture.permission || ''), /Public Domain|no-login|reuse|Public/i)
+  assert.equal(peertubeFixture.license?.id, 7, 'fixture must bind PeerTube licence id 7 (Public Domain Dedication)')
+  assert.match(String(peertubeFixture.license?.label || ''), /Public Domain Dedication/i)
+  assert.match(String(peertubeFixture.licenseEvidenceUrl || peertubeFixture.permissionSource || ''), /\/api\/v1\/videos\//)
+  assert.ok(peertubeFixture.license?.evidence?.whyValidForReuse, 'fixture must record why the license permits reuse')
+  const urls = [peertubeFixture.url, peertubeFixture.legacyUrl, peertubeFixture.embedUrl]
+  for (const url of urls) {
+    assert.equal(isPeerTubeUrl(url), true, url + ' is a PeerTube watch/embed URL')
+    assert.equal(isVideoSiteUrl(url), true, url + ' routes to yt-dlp site video')
+    assert.equal(isMediaUrl(url), false, url + ' is not a direct media file link')
+    assert.equal(isDownloadIntent('看看这个 ' + url), true, url + ' share text triggers download intent')
+    assert.equal(isDownloadIntent(url), true, 'bare ' + url + ' is download intent')
+  }
+  assert.equal(isPeerTubeUrl('https://peertube.example.org/w/AbCdEfGhIjKlMnOpQrStUv'), true)
+  assert.equal(isPeerTubeUrl('https://example.com/w/short'), false, 'short ids under 10 chars are not PeerTube')
+  assert.equal(isPeerTubeUrl('https://example.com/blog/w/not-a-video-page-here'), false)
+  assert.equal(isPeerTubeUrl('https://framatube.org/a/framasoft/video-channels'), false)
+})
 
-test('download writes file atomically with progress and follows redirects', async () => {
+
+
+test('download writes file atomically with progress and follows redirects', async (t) => {
   const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dl-'))
+  t.after(() => fs.rmSync(destDir, { recursive: true, force: true }))
   const fetchImpl = async (url) => {
     if (url === 'https://cdn.com/a.mp4') {
       return { status: 302, headers: { get: (name) => (name === 'location' ? 'https://cdn2.com/b.mp4' : null) } }
@@ -175,8 +201,9 @@ test('direct media download waits for the Windows file handle to close before re
   assert.equal(closed, true)
 })
 
-test('rejects html pages with a site-link hint and oversized files', async () => {
+test('rejects html pages with a site-link hint and oversized files', async (t) => {
   const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dl-'))
+  t.after(() => fs.rmSync(destDir, { recursive: true, force: true }))
   await assert.rejects(
     downloadRemoteMedia('https://bilibili.com/video/BV1xx', {
       destDir, dnsLookup: dnsPublic,
@@ -193,8 +220,9 @@ test('rejects html pages with a site-link hint and oversized files', async () =>
   )
 })
 
-test('rejects private-address resolutions and url-embedded credentials', async () => {
+test('rejects private-address resolutions and url-embedded credentials', async (t) => {
   const destDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-dl-'))
+  t.after(() => fs.rmSync(destDir, { recursive: true, force: true }))
   await assert.rejects(
     downloadRemoteMedia('https://internal.example/v.mp4', { destDir, dnsLookup: async () => ({ address: '192.168.1.5' }), fetchImpl: fetchReturning(200, { headers: { 'content-type': 'video/mp4' } }) }),
     /私网|保留地址/

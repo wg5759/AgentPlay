@@ -1,0 +1,49 @@
+{
+  "id": "peertube-no-login",
+  "title": "First Steps - Blender Fundamentals",
+  "url": "https://video.blender.org/w/uF6cjxuFGELN5ni6gn7oRG",
+  "legacyUrl": "https://video.blender.org/videos/watch/e8351755-4cf7-43b0-87b8-5e037db106ba",
+  "embedUrl": "https://video.blender.org/videos/embed/e8351755-4cf7-43b0-87b8-5e037db106ba",
+  "instance": "video.blender.org",
+  "shortId": "uF6cjxuFGELN5ni6gn7oRG",
+  "uuid": "e8351755-4cf7-43b0-87b8-5e037db106ba",
+  "durationSec": 93,
+  "privacy": "Public",
+  "loginRequired": false,
+  "downloadEnabled": true,
+  "uploader": "Blender",
+  "uploaderAccount": "blender@video.blender.org",
+  "channel": "Blender",
+  "attribution": "Blender Foundation / Dillon Gu - Blender Fundamentals series (Public Domain Dedication).",
+  "permission": "Explicit Public Domain Dedication on the authoritative PeerTube API record. Public no-login watch URL on the official Blender PeerTube instance; reuse permitted for automated download/regression testing of the yt-dlp PeerTube path. Do not commit cookies or bypass private/paywalled hosts. Do not redistribute the media asset from this repository.",
+  "permissionSource": "https://video.blender.org/api/v1/videos/e8351755-4cf7-43b0-87b8-5e037db106ba",
+  "licenseEvidenceUrl": "https://video.blender.org/api/v1/videos/e8351755-4cf7-43b0-87b8-5e037db106ba",
+  "licensePageUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "missingFixtureHint": "PeerTube public no-login fixture unreachable (video.blender.org /w/uF6cjxuFGELN5ni6gn7oRG). Check network access to video.blender.org or update tests/fixtures/peertube-no-login.json if Blender moved the Fundamentals clip.",
+  "notes": [
+    "Standard PeerTube short watch URL form: https://<instance>/w/<shortId>",
+    "Classic form also accepted: /videos/watch/<uuid> and /videos/embed/<uuid>",
+    "Route choices remain Download only and Download + analyze; engine is existing yt-dlp SiteVideoService",
+    "Private, password, or login-gated PeerTube hosts must still fail honestly without committed credentials",
+    "License bound to PeerTube API licence.id=7 (Public Domain Dedication) verified 2026-09-23 against video.blender.org"
+  ],
+  "license": {
+    "id": 7,
+    "label": "Public Domain Dedication",
+    "spdx": "CC0-1.0",
+    "peerTubeLicenceId": 7,
+    "verifiedAt": "2026-09-23",
+    "evidence": {
+      "api": "https://video.blender.org/api/v1/videos/e8351755-4cf7-43b0-87b8-5e037db106ba",
+      "fields": {
+        "licence.id": 7,
+        "licence.label": "Public Domain Dedication",
+        "privacy.label": "Public",
+        "downloadEnabled": true,
+        "isLocal": true,
+        "account": "blender@video.blender.org"
+      },
+      "whyValidForReuse": "PeerTube licence id 7 is Public Domain Dedication (CC0-class). The clip is local on video.blender.org, public, download-enabled, and published by the official Blender account - explicit reuse permission, not merely public/no-login availability."
+    }
+  }
+}

@@ -312,10 +312,11 @@ class SiteVideoService {
       '--print', 'after_move:filepath',
       target
     ]
-    return this.attemptWithCookies(
+    const result = await this.attemptWithCookies(
       (cookiesFile) => this.runDownload(cookiesFile ? [...baseArgs, '--cookies', cookiesFile] : baseArgs, destDir, onProgress, signal),
       { signal, onRetryNote, target }
     )
+    return { ...result, sourceUrl: target }
   }
 
   async runDownload(args, destDir, onProgress, signal) {
